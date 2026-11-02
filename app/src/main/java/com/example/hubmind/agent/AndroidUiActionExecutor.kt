@@ -49,7 +49,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Tap completed at ($x, $y)" else "Android rejected the tap gesture",
                         error = if (ok) null else "Tap gesture was cancelled by Android.",
                         durationMs = System.currentTimeMillis() - startTime
@@ -68,7 +68,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Double tap completed at ($x, $y)" else "Double tap could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -82,7 +82,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Long press completed at ($x, $y)" else "Long press could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -98,7 +98,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Swipe completed from ($startX, $startY) to ($endX, $endY)" else "Swipe gesture could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -117,7 +117,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Scroll gesture completed ($direction)" else "Scroll gesture could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -131,7 +131,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Activated the matching accessible UI element" else "No matching clickable UI element was found",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -144,7 +144,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = if (ok) "Entered text into focused input field" else "No active focused editable field found",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -156,7 +156,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Cleared text field",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -186,7 +186,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = launched,
-                        verified = launched,
+                        verified = false,
                         outputText = "Launched ${app.appName} (${app.packageName})",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -245,9 +245,9 @@ class AndroidUiActionExecutor(private val context: Context) {
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = set,
-                        verified = set,
-                        outputText = "Updated Android system clipboard",
+                        success = set && clipboardController.getClipboardText() == text,
+                        verified = set && clipboardController.getClipboardText() == text,
+                        outputText = if (set && clipboardController.getClipboardText() == text) "Updated and verified Android system clipboard" else "Android clipboard update could not be verified",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -270,7 +270,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Triggered Back navigation",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -282,7 +282,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Triggered Home navigation",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -294,7 +294,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Recents screen",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -306,7 +306,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Notification shade",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -318,7 +318,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Quick Settings panel",
                         durationMs = System.currentTimeMillis() - startTime
                     )
