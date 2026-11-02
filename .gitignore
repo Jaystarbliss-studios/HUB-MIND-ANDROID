@@ -1,22 +1,50 @@
+# Node / web
 node_modules/
 coverage/
+dist/
+build/
+out/
+release/
+server.js
 .DS_Store
 *.log
-.env*
+
+# Environment and local configuration
+.env
+.env.*
 !.env.example
+local.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+google-services.json
+**/google-services.json
+
+# Gradle / Android generated output
+.gradle/
+**/.gradle/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+captures/
+*.hprof
+
+# Android Studio
+.idea/
+*.iml
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
 
 # Native Windows helper build output
 native/**/bin/
 native/**/obj/
 native/**/publish/
-release/
 
 # Generated from the official logo during Windows packaging
 build-resources/icon.ico
 
 # Local backup snapshots
 jess_ai_backup/
-dist/
-build/
-out/
-
