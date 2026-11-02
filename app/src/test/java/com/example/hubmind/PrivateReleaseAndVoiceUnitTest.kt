@@ -9,12 +9,13 @@ class PrivateReleaseAndVoiceUnitTest {
 
     @Test
     fun testAppUpdateManifestComparison() {
-        val currentCode = 240
+        val currentCode = 1
         val manifest = AppUpdateManifest(
-            versionCode = 250,
+            versionCode = 2,
             versionName = "2.5.0",
             apkUrl = "https://hub-mind.netlify.app/downloads/hubmind-release.apk",
-            releaseNotes = "New hands-free features and bug fixes."
+            releaseNotes = "Private Android update test.",
+            sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         )
 
         assertTrue(manifest.versionCode > currentCode)
