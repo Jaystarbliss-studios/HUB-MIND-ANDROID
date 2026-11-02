@@ -17,11 +17,15 @@ class HubMindAccessibilityService : AccessibilityService() {
 
     companion object {
         private var instance: HubMindAccessibilityService? = null
+        private const val MAX_HIERARCHY_DEPTH = 24
+        private const val MAX_HIERARCHY_NODES = 2500
 
         val isServiceConnected: Boolean get() = instance != null
 
         fun getInstance(): HubMindAccessibilityService? = instance
     }
+
+    private class TraversalBudget(var visited: Int = 0)
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -41,26 +45,25 @@ class HubMindAccessibilityService : AccessibilityService() {
 
     fun dumpActiveHierarchy(): UiNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        var visited = 0
-        return parseNode(root, depth = 0, visited = { visited++ })
+        return parseNode(root, depth = 0, budget = TraversalBudget())
     }
 
     private fun parseNode(
         node: AccessibilityNodeInfo,
         depth: Int,
-        visited: () -> Int
+        budget: TraversalBudget
     ): UiNodeInfo? {
-        val current = visited()
-        if (depth > MAX_HIERARCHY_DEPTH || current >= MAX_HIERARCHY_NODES) return null
+        if (depth > MAX_HIERARCHY_DEPTH || budget.visited >= MAX_HIERARCHY_NODES) return null
+        budget.visited++
 
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
         val children = mutableListOf<UiNodeInfo>()
         for (index in 0 until node.childCount) {
-            if (current + children.size >= MAX_HIERARCHY_NODES) break
+            if (budget.visited >= MAX_HIERARCHY_NODES) break
             val child = node.getChild(index) ?: continue
-            parseNode(child, depth + 1, visited)?.let(children::add)
+            parseNode(child, depth + 1, budget)?.let(children::add)
         }
 
         return UiNodeInfo(
@@ -140,8 +143,4 @@ class HubMindAccessibilityService : AccessibilityService() {
     fun screenWidthPx(): Int = resources.displayMetrics.widthPixels
     fun screenHeightPx(): Int = resources.displayMetrics.heightPixels
 
-    private companion object Limits {
-        const val MAX_HIERARCHY_DEPTH = 24
-        const val MAX_HIERARCHY_NODES = 2500
-    }
 }
