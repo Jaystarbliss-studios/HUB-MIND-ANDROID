@@ -11,6 +11,9 @@ import com.example.hubmind.data.model.*
 import com.example.hubmind.data.HubMindRuntime
 import com.example.hubmind.agent.HubMindAccessibilityService
 import com.example.hubmind.agent.HubMindAgentForegroundService
+import com.example.hubmind.agent.AndroidLiveToolExecutor
+import com.example.hubmind.agent.AndroidToolCatalog
+import com.example.hubmind.data.HubMindMemoryContext
 import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
@@ -347,14 +350,13 @@ class JessRepositoryImpl(
     private val conversationRepository: ConversationRepository,
     private val authRepository: AuthRepository,
     private val deviceControlRepository: DeviceControlRepository,
-    private val deviceRegistryRepository: DeviceRegistryRepository
+    private val deviceRegistryRepository: DeviceRegistryRepository,
+    context: Context
 ) : JessRepository {
+    private val androidToolExecutor = AndroidLiveToolExecutor(context.applicationContext)
     private val _liveState = MutableStateFlow(JessLiveState.IDLE)
     override val liveState: StateFlow<JessLiveState> = _liveState.asStateFlow()
 
-    // HTTP chat can be available independently of the Gemini Live audio session.
-    // Do not report a live voice connection until the Android WebSocket client
-    // and lease coordination have actually been implemented.
     private val _connectionState = MutableStateFlow(LiveConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<LiveConnectionState> = _connectionState.asStateFlow()
 
@@ -386,11 +388,8 @@ class JessRepositoryImpl(
             val answer = withContext(Dispatchers.IO) {
                 val idToken = authRepository.getIdToken()
                     ?: throw IllegalStateException("Your Hub-Mind sign-in session is unavailable. Sign in again.")
-
                 val baseUrl = BuildConfig.HUBMIND_API_BASE_URL.trimEnd('/')
-                if (!baseUrl.startsWith("https://")) {
-                    throw IllegalStateException("Hub-Mind API must use HTTPS.")
-                }
+                require(baseUrl.startsWith("https://")) { "Hub-Mind API must use HTTPS." }
 
                 val conversation = conversationRepository.currentConversation.value
                 val priorMessages = conversation?.let {
@@ -417,62 +416,77 @@ class JessRepositoryImpl(
                     )
                 }
 
+                val user = authRepository.currentUser.value
+                val memories = user?.id?.let { HubMindMemoryContext.load(it) }.orEmpty()
+                val localDeviceId = deviceRegistryRepository.currentTargetDevice.value?.deviceId
+                val localToolsAllowed = targetDeviceId.isNullOrBlank() || targetDeviceId == localDeviceId
+
                 val systemInstruction = buildString {
                     append("You are Jess, the assistant inside the user's Hub-Mind Android application. ")
-                    append("Answer naturally and use the authenticated Hub-Mind backend. ")
-                    append("This Android build does not yet have an operational remote device command transport. ")
-                    append("Never claim that you opened an app, changed a device, read a screen, sent a message, ")
-                    append("or performed another device action unless a real native execution result is supplied. ")
-                    append("When asked to control another device, explain that cross-device execution is not connected yet.")
+                    append("Answer naturally and use the authenticated Hub-Mind Gemini backend. ")
+                    append("You can operate this Android phone using the local native Android tools when the user requests an action. ")
+                    append("Use screen hierarchy before coordinate-based actions whenever possible. ")
+                    append("Never claim an action succeeded unless its tool result reports success. ")
+                    append("If a tool reports success but verified=false, explain that Android accepted the action but the resulting screen was not independently verified. ")
+                    append("Accessibility actions require the user to enable Hub-Mind Accessibility Service in Android Settings. ")
+                    append("Remote control of the user's Windows laptop or other paired devices is not connected in this Android build yet.")
                     if (!targetDeviceId.isNullOrBlank()) {
-                        append(" The user's currently selected device ID is ")
-                        append(targetDeviceId)
-                        append(", but selection alone does not prove that the device is online or controllable.")
+                        append(" The user's selected device ID is ").append(targetDeviceId).append(". ")
+                        if (!localToolsAllowed) append("Do not use local Android tools for that remote target.")
+                    }
+                    if (user != null) {
+                        append("\nSigned-in Hub-Mind user: ")
+                        append(user.preferredName.ifBlank { user.displayName })
+                        append("; account role: ").append(user.role).append(".")
+                    }
+                    if (memories.isNotBlank()) {
+                        append("\n\nSaved user memories from shared Hub-Mind Firestore:\n")
+                        append(memories)
                     }
                 }
 
-                val requestBody = JSONObject()
-                    .put("messages", messageArray)
-                    .put("systemInstruction", systemInstruction)
-                    .put("autoSearch", true)
+                val tools = if (localToolsAllowed) {
+                    JSONArray().put(JSONObject().put("functionDeclarations", AndroidToolCatalog.functionDeclarations()))
+                } else JSONArray()
 
-                val connection = (URL(baseUrl + "/api/chat").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 15000
-                    readTimeout = 60000
-                    doOutput = true
-                    setRequestProperty("Accept", "application/json")
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("Authorization", "Bearer " + idToken)
+                var rounds = 0
+                while (rounds < 6) {
+                    val requestBody = JSONObject()
+                        .put("messages", messageArray)
+                        .put("systemInstruction", systemInstruction)
+                        .put("autoSearch", true)
+                    if (tools.length() > 0) requestBody.put("tools", tools)
+
+                    val responseJson = postChatRequest(baseUrl, idToken, requestBody)
+                    val calls = responseJson.optJSONArray("functionCalls")
+                    if (calls == null || calls.length() == 0) {
+                        val text = responseJson.optString("text").trim()
+                        if (text.isBlank()) throw IllegalStateException("Jess backend returned an empty response.")
+                        return@withContext text
+                    }
+
+                    responseJson.optJSONObject("message")?.let { messageArray.put(it) }
+                    val functionResponses = JSONArray()
+                    for (index in 0 until calls.length()) {
+                        val call = calls.optJSONObject(index) ?: continue
+                        val name = call.optString("name")
+                        if (name.isBlank()) continue
+                        val callId = call.optString("id").ifBlank { UUID.randomUUID().toString() }
+                        val args = call.optJSONObject("args") ?: JSONObject()
+                        val result = androidToolExecutor.execute(name, args)
+                        val response = JSONObject()
+                            .put("name", name)
+                            .put("id", callId)
+                            .put("response", result)
+                        functionResponses.put(JSONObject().put("functionResponse", response))
+                    }
+                    if (functionResponses.length() == 0) {
+                        throw IllegalStateException("Jess returned a tool request that Android could not interpret.")
+                    }
+                    messageArray.put(JSONObject().put("role", "user").put("parts", functionResponses))
+                    rounds += 1
                 }
-
-                try {
-                    connection.outputStream.use { output ->
-                        output.write(requestBody.toString().toByteArray(Charsets.UTF_8))
-                    }
-
-                    val statusCode = connection.responseCode
-                    val responseStream = if (statusCode in 200..299) {
-                        connection.inputStream
-                    } else {
-                        connection.errorStream
-                    }
-                    val responseBody = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    val responseJson = runCatching { JSONObject(responseBody) }.getOrNull()
-
-                    if (statusCode !in 200..299) {
-                        val detail = responseJson?.optString("text")
-                            ?.takeIf { it.isNotBlank() }
-                            ?: responseJson?.optString("error")?.takeIf { it.isNotBlank() }
-                            ?: "Hub-Mind backend returned HTTP " + statusCode + "."
-                        throw IllegalStateException(detail)
-                    }
-
-                    responseJson?.optString("text")?.takeIf { it.isNotBlank() }
-                        ?: throw IllegalStateException("Jess backend returned an empty response.")
-                } finally {
-                    connection.disconnect()
-                }
+                throw IllegalStateException("Jess reached the Android action limit for one request. Ask it to continue.")
             }
 
             _connectionState.value = LiveConnectionState.CONNECTED
@@ -483,6 +497,44 @@ class JessRepositoryImpl(
             _connectionState.value = LiveConnectionState.ERROR
             _liveState.value = JessLiveState.ERROR
             throw error
+        }
+    }
+
+    private fun postChatRequest(baseUrl: String, idToken: String, requestBody: JSONObject): JSONObject {
+        val connection = (URL(baseUrl + "/api/chat").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("Authorization", "Bearer $idToken")
+        }
+        try {
+            connection.outputStream.use { output ->
+                output.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+            }
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            val responseJson = runCatching { JSONObject(responseBody) }.getOrNull()
+            if (statusCode !in 200..299) {
+                val detail = responseJson?.optString("text")?.takeIf { it.isNotBlank() }
+                    ?: responseJson?.optString("error")?.takeIf { it.isNotBlank() }
+                    ?: "Hub-Mind backend returned HTTP $statusCode."
+                throw IllegalStateException(detail)
+            }
+            if (responseJson == null) throw IllegalStateException("Hub-Mind returned an invalid response.")
+            if (responseJson.optBoolean("serviceError")) {
+                throw IllegalStateException(
+                    responseJson.optString("detail").ifBlank {
+                        responseJson.optString("error", "Jess could not complete the request.")
+                    }
+                )
+            }
+            return responseJson
+        } finally {
+            connection.disconnect()
         }
     }
 }
