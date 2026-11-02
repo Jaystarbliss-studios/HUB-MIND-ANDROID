@@ -28,15 +28,9 @@ import com.example.hubmind.ui.theme.*
 @Composable
 fun AuthScreen(
     viewModel: AuthViewModel,
-    onAuthSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
-
-    // If user is already authenticated, notify caller
-    if (state.user != null && !state.isLoading) {
-        onAuthSuccess()
-    }
 
     Box(
         modifier = modifier
