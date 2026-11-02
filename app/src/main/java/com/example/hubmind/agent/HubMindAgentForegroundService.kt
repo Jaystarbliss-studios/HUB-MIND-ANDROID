@@ -7,25 +7,34 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.hubmind.MainActivity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class HubMindAgentForegroundService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "hubmind_agent_session_channel"
         private const val NOTIFICATION_ID = 2844
+        private val _isRunning = MutableStateFlow(false)
+        val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
-        fun startService(context: Context) {
+        fun startService(context: Context): Boolean {
             val intent = Intent(context, HubMindAgentForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            return runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            }.getOrDefault(false)
         }
 
         fun stopService(context: Context) {
             val intent = Intent(context, HubMindAgentForegroundService::class.java)
             context.stopService(intent)
+            _isRunning.value = false
         }
     }
 
@@ -48,8 +57,24 @@ class HubMindAgentForegroundService : Service() {
             .setContentIntent(pendingIntent)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
-        return START_STICKY
+        return try {
+            startForeground(NOTIFICATION_ID, notification)
+            _isRunning.value = true
+            START_STICKY
+        } catch (_: SecurityException) {
+            _isRunning.value = false
+            stopSelf(startId)
+            START_NOT_STICKY
+        } catch (_: IllegalStateException) {
+            _isRunning.value = false
+            stopSelf(startId)
+            START_NOT_STICKY
+        }
+    }
+
+    override fun onDestroy() {
+        _isRunning.value = false
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
