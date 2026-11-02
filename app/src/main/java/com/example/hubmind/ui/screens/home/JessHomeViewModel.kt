@@ -13,11 +13,12 @@ data class JessHomeUiState(
     val currentConversation: Conversation? = null,
     val messages: List<ChatMessage> = emptyList(),
     val liveState: JessLiveState = JessLiveState.IDLE,
-    val connectionState: LiveConnectionState = LiveConnectionState.CONNECTED,
+    val connectionState: LiveConnectionState = LiveConnectionState.DISCONNECTED,
     val targetDevice: DeviceNode? = null,
     val isMicActive: Boolean = false,
     val currentInput: String = "",
-    val isSending: Boolean = false
+    val isSending: Boolean = false,
+    val noticeMessage: String? = null
 )
 
 class JessHomeViewModel(
@@ -30,8 +31,12 @@ class JessHomeViewModel(
     val uiState: StateFlow<JessHomeUiState> = _uiState.asStateFlow()
 
     init {
-        // Collect current conversation
+        // Create a clean local draft until the Firebase conversation adapter
+        // is connected. Do not seed the app with fabricated desktop history.
         viewModelScope.launch {
+            if (conversationRepository.currentConversation.value == null) {
+                conversationRepository.createConversation("New Jess Conversation")
+            }
             conversationRepository.currentConversation.collect { conv ->
                 _uiState.value = _uiState.value.copy(currentConversation = conv)
                 conv?.let { loadMessages(it.id) }
@@ -73,46 +78,68 @@ class JessHomeViewModel(
     }
 
     fun toggleMic() {
-        val next = !_uiState.value.isMicActive
-        _uiState.value = _uiState.value.copy(isMicActive = next)
         viewModelScope.launch {
-            if (next) {
-                jessRepository.startVoiceSession()
-            } else {
+            if (_uiState.value.isMicActive) {
                 jessRepository.endVoiceSession()
+                _uiState.value = _uiState.value.copy(
+                    isMicActive = false,
+                    noticeMessage = "Voice session stopped."
+                )
+            } else {
+                val started = jessRepository.startVoiceSession()
+                _uiState.value = _uiState.value.copy(
+                    isMicActive = started,
+                    noticeMessage = if (started) null else
+                        "Jess Live voice is not connected in this build yet. Text chat uses the Hub-Mind backend."
+                )
             }
         }
     }
 
     fun sendPrompt(customPrompt: String? = null) {
-        val text = customPrompt ?: _uiState.value.currentInput
-        if (text.isBlank()) return
+        val text = (customPrompt ?: _uiState.value.currentInput).trim()
+        if (text.isBlank() || _uiState.value.isSending) return
 
-        val conv = _uiState.value.currentConversation ?: return
-        val target = _uiState.value.targetDevice?.deviceId
-
-        _uiState.value = _uiState.value.copy(currentInput = "", isSending = true)
+        _uiState.value = _uiState.value.copy(
+            currentInput = "",
+            isSending = true,
+            noticeMessage = null
+        )
 
         viewModelScope.launch {
-            // Post user message
-            conversationRepository.postUserMessage(conv.id, text, target)
-
-            // Query Jess
-            val responseFlow = jessRepository.sendPrompt(text, target)
-            var responseText = ""
-            responseFlow.collect { chunk ->
-                responseText = chunk
+            var conversation = _uiState.value.currentConversation
+            if (conversation == null) {
+                conversation = conversationRepository.createConversation("New Jess Conversation")
             }
+            val target = _uiState.value.targetDevice?.deviceId
+            conversationRepository.postUserMessage(conversation.id, text, target)
 
-            // Append Jess response
-            conversationRepository.appendJessResponse(
-                conversationId = conv.id,
-                text = responseText,
-                toolName = if (text.contains("open", true) || text.contains("launch", true) || text.contains("pc", true)) "device_action" else null,
-                status = "done_verified"
-            )
-
-            _uiState.value = _uiState.value.copy(isSending = false)
+            try {
+                var responseText = ""
+                jessRepository.sendPrompt(text, target).collect { chunk ->
+                    responseText = chunk
+                }
+                if (responseText.isBlank()) {
+                    throw IllegalStateException("Jess returned an empty response.")
+                }
+                conversationRepository.appendJessResponse(
+                    conversationId = conversation.id,
+                    text = responseText,
+                    toolName = null,
+                    status = null
+                )
+            } catch (error: Exception) {
+                val message = error.message ?: "Jess could not complete the request."
+                conversationRepository.appendJessResponse(
+                    conversationId = conversation.id,
+                    text = message,
+                    toolName = null,
+                    status = "failed"
+                )
+                _uiState.value = _uiState.value.copy(noticeMessage = message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isSending = false)
+            }
         }
     }
 
