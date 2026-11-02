@@ -129,18 +129,15 @@ class AndroidUiActionExecutor(private val context: Context) {
                                 ?.lowercase()
                                 ?: "down"
                             val points = when (direction) {
-                                "up" -> Triple(width * 0.5f, height * 0.75f, height * 0.25f)
-                                "down" -> Triple(width * 0.5f, height * 0.25f, height * 0.75f)
-                                "left" -> Triple(width * 0.75f, height * 0.5f, width * 0.25f)
-                                "right" -> Triple(width * 0.25f, height * 0.5f, width * 0.75f)
+                                "up" -> listOf(width * 0.5f, height * 0.75f, width * 0.5f, height * 0.25f)
+                                "down" -> listOf(width * 0.5f, height * 0.25f, width * 0.5f, height * 0.75f)
+                                "left" -> listOf(width * 0.75f, height * 0.5f, width * 0.25f, height * 0.5f)
+                                "right" -> listOf(width * 0.25f, height * 0.5f, width * 0.75f, height * 0.5f)
                                 else -> return@withContext failure("SCROLL direction must be up, down, left or right.")
                             }
-                            val (x, start, end) = points
-                            val completed = if (direction == "left" || direction == "right") {
-                                service.performSwipe(start, x, end, x)
-                            } else {
-                                service.performSwipe(x, start, x, end)
-                            }
+                            val completed = service.performSwipe(
+                                points[0], points[1], points[2], points[3]
+                            )
                             if (completed) accepted("Scroll gesture completed by Android.")
                             else failure("Android rejected or cancelled the scroll gesture.")
                         }
