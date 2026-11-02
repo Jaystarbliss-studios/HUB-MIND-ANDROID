@@ -674,11 +674,11 @@ class AndroidAgentControllerImpl(private val context: Context) : AndroidAgentCon
     }
 }
 
-class PermissionStatusRepositoryImpl : PermissionStatusRepository {
-    private val _hasRecordAudio = MutableStateFlow(true)
+class PermissionStatusRepositoryImpl(private val context: Context) : PermissionStatusRepository {
+    private val _hasRecordAudio = MutableStateFlow(false)
     override val hasRecordAudio: StateFlow<Boolean> = _hasRecordAudio.asStateFlow()
 
-    private val _hasPostNotifications = MutableStateFlow(true)
+    private val _hasPostNotifications = MutableStateFlow(false)
     override val hasPostNotifications: StateFlow<Boolean> = _hasPostNotifications.asStateFlow()
 
     private val _hasSystemAlertWindow = MutableStateFlow(false)
@@ -687,19 +687,34 @@ class PermissionStatusRepositoryImpl : PermissionStatusRepository {
     private val _hasAccessibilityService = MutableStateFlow(false)
     override val hasAccessibilityService: StateFlow<Boolean> = _hasAccessibilityService.asStateFlow()
 
-    override fun updatePermissions(
-        audio: Boolean,
-        notifications: Boolean,
-        overlay: Boolean,
-        accessibility: Boolean
-    ) {
-        _hasRecordAudio.value = audio
-        _hasPostNotifications.value = notifications
-        _hasSystemAlertWindow.value = overlay
-        _hasAccessibilityService.value = accessibility
+    init {
+        refresh()
+    }
+
+    override fun refresh() {
+        _hasRecordAudio.value = context.checkSelfPermission(
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        _hasPostNotifications.value = android.os.Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        _hasSystemAlertWindow.value = android.provider.Settings.canDrawOverlays(context)
+
+        val expectedComponent = android.content.ComponentName(
+            context,
+            HubMindAccessibilityService::class.java
+        ).flattenToString()
+        val enabledServices = android.provider.Settings.Secure.getString(
+            context.contentResolver,
+            android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ).orEmpty()
+        _hasAccessibilityService.value = enabledServices.split(':').any {
+            it.equals(expectedComponent, ignoreCase = true)
+        }
     }
 }
-
 class VoiceInteractionRepositoryImpl : VoiceInteractionRepository {
     private val _isMicMuted = MutableStateFlow(false)
     override val isMicMuted: StateFlow<Boolean> = _isMicMuted.asStateFlow()
