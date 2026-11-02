@@ -7,72 +7,213 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
 import com.example.hubmind.data.model.*
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
-class AuthRepositoryImpl : AuthRepository {
-    private val _currentUser = MutableStateFlow<User?>(
-        User(
-            id = "usr-hubmind-admin-01",
-            email = "johnrufai242@gmail.com",
-            displayName = "John Rufai",
-            preferredName = "Johnny",
-            role = "admin",
-            status = "active",
-            lastSeenAt = "Just now"
+class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
+    companion object {
+        private const val FIRESTORE_DATABASE_ID =
+            "ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430"
+        private val ADMIN_EMAILS = setOf(
+            "johnrufai242@gmail.com",
+            "rufaijohnny@gmail.com"
         )
-    )
+    }
+
+    private val firebaseApp = context?.let { appContext ->
+        FirebaseApp.getApps(appContext).firstOrNull()
+            ?: FirebaseApp.initializeApp(appContext)
+    }
+    private val firebaseAuth = firebaseApp?.let { FirebaseAuth.getInstance(it) }
+    private val firestore = firebaseApp?.let { app ->
+        runCatching { FirebaseFirestore.getInstance(app, FIRESTORE_DATABASE_ID) }.getOrNull()
+    }
+
+    override val configurationError: String? = when {
+        context == null -> "Firebase Android configuration is unavailable in this test context."
+        firebaseApp == null -> "Firebase is not configured for this Android app. Register the Android package in the existing Hub-Mind Firebase project and add app/google-services.json."
+        firebaseAuth == null || firestore == null -> "Firebase could not be initialised. Check app/google-services.json and the registered Android package."
+        else -> null
+    }
+
+    private val _currentUser = MutableStateFlow<User?>(null)
     override val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
-    private val _isSessionValid = MutableStateFlow(true)
+    private val _isSessionValid = MutableStateFlow(false)
     override val isSessionValid: StateFlow<Boolean> = _isSessionValid.asStateFlow()
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        firebaseAuth?.addAuthStateListener { auth ->
+            val firebaseUser = auth.currentUser
+            if (firebaseUser == null) {
+                _currentUser.value = null
+                _isSessionValid.value = false
+            } else {
+                scope.launch {
+                    runCatching { loadAuthorizedProfile(firebaseUser) }
+                        .onSuccess { profile ->
+                            _currentUser.value = profile
+                            _isSessionValid.value = profile != null
+                        }
+                        .onFailure {
+                            _currentUser.value = null
+                            _isSessionValid.value = false
+                        }
+                }
+            }
+        }
+    }
+
     override suspend fun signIn(email: String, password: String): Result<User> {
-        delay(600)
-        val normalized = email.trim().lowercase()
-        val isAdmin = normalized in listOf("johnrufai242@gmail.com", "rufaijohnny@gmail.com")
-        val user = User(
-            id = "usr-" + UUID.randomUUID().toString().take(8),
-            email = normalized,
-            displayName = if (isAdmin) "John Rufai" else normalized.substringBefore("@").replaceFirstChar { it.uppercase() },
-            preferredName = if (isAdmin) "Johnny" else "",
-            role = if (isAdmin) "admin" else "staff",
-            status = "active",
-            lastSeenAt = "Just now"
+        val auth = firebaseAuth
+            ?: return Result.failure(IllegalStateException(configurationError ?: "Firebase Auth is unavailable."))
+        if (email.isBlank() || password.isBlank()) {
+            return Result.failure(IllegalArgumentException("Enter your Hub-Mind email and password."))
+        }
+
+        return runCatching {
+            val credential = auth.signInWithEmailAndPassword(email.trim(), password).await()
+            val firebaseUser = credential.user
+                ?: throw IllegalStateException("Firebase did not return an authenticated user.")
+            val profile = loadAuthorizedProfile(firebaseUser)
+            _currentUser.value = profile
+            _isSessionValid.value = true
+            profile
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { error ->
+                auth.signOut()
+                _currentUser.value = null
+                _isSessionValid.value = false
+                Result.failure(error)
+            }
         )
-        _currentUser.value = user
-        _isSessionValid.value = true
-        return Result.success(user)
     }
 
     override suspend fun signInWithGoogle(idToken: String): Result<User> {
-        delay(800)
-        val user = User(
-            id = "usr-google-auth-01",
-            email = "johnrufai242@gmail.com",
-            displayName = "John Rufai",
-            preferredName = "Johnny",
-            role = "admin",
-            status = "active",
-            lastSeenAt = "Just now"
+        val auth = firebaseAuth
+            ?: return Result.failure(IllegalStateException(configurationError ?: "Firebase Auth is unavailable."))
+        if (idToken.isBlank()) {
+            return Result.failure(IllegalArgumentException("A real Google ID token is required."))
+        }
+
+        return runCatching {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            val result = auth.signInWithCredential(credential).await()
+            val firebaseUser = result.user
+                ?: throw IllegalStateException("Google sign-in did not return an authenticated user.")
+            val profile = loadAuthorizedProfile(firebaseUser)
+            _currentUser.value = profile
+            _isSessionValid.value = true
+            profile
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { error ->
+                auth.signOut()
+                _currentUser.value = null
+                _isSessionValid.value = false
+                Result.failure(error)
+            }
         )
-        _currentUser.value = user
-        _isSessionValid.value = true
-        return Result.success(user)
+    }
+
+    private suspend fun loadAuthorizedProfile(firebaseUser: FirebaseUser): User {
+        val db = firestore ?: throw IllegalStateException(
+            configurationError ?: "Cloud Firestore is unavailable."
+        )
+        val uid = firebaseUser.uid
+        val email = firebaseUser.email?.trim()?.lowercase().orEmpty()
+        if (email.isBlank()) {
+            throw IllegalStateException("The signed-in Firebase account has no email address.")
+        }
+
+        val profileRef = db.collection("users").document(uid)
+        var snapshot = profileRef.get().await()
+
+        // Match the website's bootstrap rule: only configured administrator
+        // identities may create their own initial admin profile.
+        if (!snapshot.exists() && email in ADMIN_EMAILS) {
+            val displayName = firebaseUser.displayName?.takeIf { it.isNotBlank() }
+                ?: email.substringBefore("@")
+            val now = java.time.Instant.now().toString()
+            val bootstrapProfile = mapOf(
+                "id" to uid,
+                "email" to email,
+                "name" to displayName,
+                "displayName" to displayName,
+                "role" to "admin",
+                "status" to "active",
+                "createdAt" to now,
+                "approvedAt" to now,
+                "defaultVisibility" to "workspace"
+            )
+            profileRef.set(bootstrapProfile).await()
+            snapshot = profileRef.get().await()
+        }
+
+        if (!snapshot.exists()) {
+            throw IllegalStateException(
+                "This account has no Hub-Mind profile. Ask an administrator to authorise it from the main website."
+            )
+        }
+
+        val data = snapshot.data.orEmpty()
+        val status = (data["status"] as? String).orEmpty()
+        if (status != "active") {
+            throw IllegalStateException(
+                if (status == "suspended" || status == "inactive") {
+                    "Your Hub-Mind account is currently inactive. Contact an administrator."
+                } else {
+                    "Your Hub-Mind account is not active yet. Contact an administrator."
+                }
+            )
+        }
+
+        return User(
+            id = uid,
+            email = email,
+            displayName = (data["displayName"] as? String)
+                ?: (data["name"] as? String)
+                ?: firebaseUser.displayName
+                ?: email.substringBefore("@"),
+            preferredName = data["preferredName"] as? String ?: "",
+            role = data["role"] as? String ?: "staff",
+            status = status,
+            photoUrl = firebaseUser.photoUrl?.toString() ?: data["photoUrl"] as? String,
+            phone = data["phone"] as? String,
+            lastSeenAt = java.time.Instant.now().toString()
+        )
+    }
+
+    override suspend fun getIdToken(): String? {
+        return runCatching {
+            firebaseAuth?.currentUser?.getIdToken(false)?.await()?.token
+        }.getOrNull()
     }
 
     override suspend fun signOut() {
+        firebaseAuth?.signOut()
         _currentUser.value = null
         _isSessionValid.value = false
     }
 
-    override suspend fun checkHealth(): Boolean = true
+    override suspend fun checkHealth(): Boolean {
+        return firebaseApp != null && firebaseAuth != null && firestore != null
+    }
 }
-
 class ConversationRepositoryImpl : ConversationRepository {
     private val _conversations = MutableStateFlow<List<Conversation>>(
         listOf(
