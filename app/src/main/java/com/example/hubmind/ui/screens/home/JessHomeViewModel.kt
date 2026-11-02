@@ -133,6 +133,10 @@ class JessHomeViewModel(
         _uiState.update { it.copy(currentInput = text) }
     }
 
+    fun showNotice(message: String) {
+        _uiState.update { it.copy(noticeMessage = message) }
+    }
+
     fun toggleMic() {
         if (_uiState.value.isMicActive) {
             viewModelScope.launch {
