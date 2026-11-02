@@ -11,11 +11,11 @@ import kotlinx.coroutines.launch
 
 data class SettingsUiState(
     val user: User? = null,
-    val permissionMode: String = "allow-routine", // "ask" | "allow-routine" | "allow-everything"
-    val fullControlEnabled: Boolean = true,
+    val permissionMode: String = "ask", // "ask" | "allow-routine" | "allow-everything"
+    val fullControlEnabled: Boolean = false,
     val confirmHighRiskSpoken: Boolean = true,
-    val memoryEnabled: Boolean = true,
-    val contextScannerEnabled: Boolean = true,
+    val memoryEnabled: Boolean = false,
+    val contextScannerEnabled: Boolean = false,
     val hasAudioPermission: Boolean = false,
     val hasNotificationPermission: Boolean = false,
     val hasOverlayPermission: Boolean = false,
