@@ -110,6 +110,21 @@ class AndroidNativeBridge(
         }
 
         when (requestedAction) {
+            "OPEN_ACCESSIBILITY_SETTINGS" -> {
+                activity.runOnUiThread { activity.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                return JSONObject().put("success", true).put("verified", false)
+                    .put("message", "Opened Android Accessibility Settings. Enable Hub-Mind Accessibility there, then return to Hub-Mind.")
+            }
+            "START_AGENT_SESSION" -> {
+                activity.runOnUiThread { HubMindAgentForegroundService.startService(activity) }
+                return JSONObject().put("success", true).put("verified", false)
+                    .put("message", "Requested the visible Hub-Mind foreground device-control session.")
+            }
+            "STOP_AGENT_SESSION" -> {
+                activity.runOnUiThread { HubMindAgentForegroundService.stopService(activity) }
+                return JSONObject().put("success", true).put("verified", true)
+                    .put("message", "Stopped the Hub-Mind foreground device-control session.")
+            }
             "GET_DEVICE_STATUS" -> return deviceStatusResult()
             "GET_INSTALLED_APPS" -> return installedAppsResult()
             "OPEN_DEEP_LINK" -> return openDeepLink(args)
