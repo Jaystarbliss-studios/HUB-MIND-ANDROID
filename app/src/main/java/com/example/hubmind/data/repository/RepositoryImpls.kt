@@ -8,6 +8,8 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
 import com.example.hubmind.data.model.*
+import com.example.hubmind.agent.HubMindAccessibilityService
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
