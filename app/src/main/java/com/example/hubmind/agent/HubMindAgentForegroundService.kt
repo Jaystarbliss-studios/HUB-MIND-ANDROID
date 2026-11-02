@@ -6,7 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.example.hubmind.MainActivity
+import com.example.hubmind.HubMindWebViewActivity
 
 class HubMindAgentForegroundService : Service() {
 
@@ -36,7 +36,7 @@ class HubMindAgentForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            this, 0, Intent(this, HubMindWebViewActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
