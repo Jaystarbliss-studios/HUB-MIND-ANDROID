@@ -1,5 +1,11 @@
 package com.example.hubmind.ui.screens.home
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,6 +45,22 @@ fun JessHomeScreen(
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.toggleMic()
+        else viewModel.showNotice("Microphone permission is required for Jess Live voice.")
+    }
+    val onMicClick = {
+        if (state.isMicActive) {
+            viewModel.toggleMic()
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            viewModel.toggleMic()
+        } else {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     // Auto-scroll when new messages arrive
     LaunchedEffect(state.messages.size) {
@@ -71,7 +94,7 @@ fun JessHomeScreen(
                 JessOrbView(
                     state = state.liveState,
                     size = 120.dp,
-                    onClick = viewModel::toggleMic
+                    onClick = onMicClick
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -91,6 +114,14 @@ fun JessHomeScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = Amber400,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+                if (state.liveTranscript.isNotBlank()) {
+                    Text(
+                        text = state.liveTranscript,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Slate200,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
                     )
                 }
 
