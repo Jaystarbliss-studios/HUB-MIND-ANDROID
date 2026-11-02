@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
 import com.example.hubmind.data.model.*
+import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
@@ -18,6 +19,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
@@ -216,89 +223,16 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
     }
 }
 class ConversationRepositoryImpl : ConversationRepository {
-    private val _conversations = MutableStateFlow<List<Conversation>>(
-        listOf(
-            Conversation(
-                id = "conv-daily-ops-01",
-                title = "Studio Operations & Client Delivery",
-                summary = "Active projects and workflow synchronization with Jaystarbliss Studio.",
-                messageCount = 6,
-                updatedAt = System.currentTimeMillis() - 3600000,
-                isLiveSession = false
-            ),
-            Conversation(
-                id = "conv-jess-desktop-02",
-                title = "Windows Desktop Device Control",
-                summary = "Automated VS Code build check and system telemetry query.",
-                messageCount = 4,
-                updatedAt = System.currentTimeMillis() - 1800000,
-                isLiveSession = true
-            )
-        )
-    )
+    // This repository is intentionally local-only until the Android Firestore
+    // conversation adapter is connected to the website's StoredConversation schema.
+    // It starts empty instead of displaying fabricated historical conversations.
+    private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     override val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
 
-    private val _currentConversation = MutableStateFlow<Conversation?>(_conversations.value.firstOrNull())
+    private val _currentConversation = MutableStateFlow<Conversation?>(null)
     override val currentConversation: StateFlow<Conversation?> = _currentConversation.asStateFlow()
 
     private val messagesMap = mutableMapOf<String, MutableStateFlow<List<ChatMessage>>>()
-
-    init {
-        messagesMap["conv-daily-ops-01"] = MutableStateFlow(
-            listOf(
-                ChatMessage(
-                    id = "msg-01",
-                    sender = MessageSender.USER,
-                    text = "Jess, how are our active projects progressing today?",
-                    timestamp = System.currentTimeMillis() - 3600000
-                ),
-                ChatMessage(
-                    id = "msg-02",
-                    sender = MessageSender.JESS,
-                    text = "Good afternoon! All 3 studio tasks for Jaystarbliss Studios are on schedule. The client document revision is ready for review, and the Windows workstation agent is online.",
-                    timestamp = System.currentTimeMillis() - 3590000
-                ),
-                ChatMessage(
-                    id = "msg-03",
-                    sender = MessageSender.USER,
-                    text = "Can you open the documents folder on my Windows desktop?",
-                    timestamp = System.currentTimeMillis() - 3580000,
-                    targetDeviceId = "win-main-workstation"
-                ),
-                ChatMessage(
-                    id = "msg-04",
-                    sender = MessageSender.JESS,
-                    text = "I've launched Explorer on your Windows workstation targeting the documents workspace.",
-                    timestamp = System.currentTimeMillis() - 3570000,
-                    targetDeviceId = "win-main-workstation",
-                    toolCallName = "launch_windows_application",
-                    toolCallArgs = "{ appName: 'explorer' }",
-                    executionStatus = "done_verified"
-                )
-            )
-        )
-
-        messagesMap["conv-jess-desktop-02"] = MutableStateFlow(
-            listOf(
-                ChatMessage(
-                    id = "msg-10",
-                    sender = MessageSender.USER,
-                    text = "Jess, check system diagnostics on my PC.",
-                    timestamp = System.currentTimeMillis() - 1800000,
-                    targetDeviceId = "win-main-workstation"
-                ),
-                ChatMessage(
-                    id = "msg-11",
-                    sender = MessageSender.JESS,
-                    text = "Windows 11 ThinkPad P1 Gen 6: CPU load 14%, Memory 22.4 GB / 64 GB, Storage C: 342 GB free. Full Control Session is currently active.",
-                    timestamp = System.currentTimeMillis() - 1790000,
-                    targetDeviceId = "win-main-workstation",
-                    toolCallName = "get_windows_system_info",
-                    executionStatus = "done_verified"
-                )
-            )
-        )
-    }
 
     override fun getMessages(conversationId: String): Flow<List<ChatMessage>> {
         return messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }.asStateFlow()
@@ -309,13 +243,14 @@ class ConversationRepositoryImpl : ConversationRepository {
     }
 
     override suspend fun createConversation(title: String): Conversation {
+        val now = System.currentTimeMillis()
         val newConv = Conversation(
-            id = "conv-" + UUID.randomUUID().toString().take(8),
+            id = "conv-" + UUID.randomUUID().toString(),
             title = title.ifBlank { "New Jess Conversation" },
-            summary = "Fresh session",
+            summary = "",
             messageCount = 0,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis()
+            createdAt = now,
+            updatedAt = now
         )
         _conversations.value = listOf(newConv) + _conversations.value
         _currentConversation.value = newConv
@@ -328,16 +263,16 @@ class ConversationRepositoryImpl : ConversationRepository {
         text: String,
         targetDeviceId: String?
     ): ChatMessage {
-        val msg = ChatMessage(
-            id = "msg-" + UUID.randomUUID().toString().take(8),
+        val message = ChatMessage(
+            id = "msg-" + UUID.randomUUID().toString(),
             sender = MessageSender.USER,
             text = text,
             timestamp = System.currentTimeMillis(),
             targetDeviceId = targetDeviceId
         )
         val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
-        return msg
+        flow.value = flow.value + message
+        return message
     }
 
     override suspend fun appendJessResponse(
@@ -346,8 +281,8 @@ class ConversationRepositoryImpl : ConversationRepository {
         toolName: String?,
         status: String?
     ): ChatMessage {
-        val msg = ChatMessage(
-            id = "msg-" + UUID.randomUUID().toString().take(8),
+        val message = ChatMessage(
+            id = "msg-" + UUID.randomUUID().toString(),
             sender = MessageSender.JESS,
             text = text,
             timestamp = System.currentTimeMillis(),
@@ -355,37 +290,39 @@ class ConversationRepositoryImpl : ConversationRepository {
             executionStatus = status
         )
         val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
-        return msg
+        flow.value = flow.value + message
+        return message
     }
 }
-
 class JessRepositoryImpl(
     private val conversationRepository: ConversationRepository,
+    private val authRepository: AuthRepository,
     private val deviceControlRepository: DeviceControlRepository,
     private val deviceRegistryRepository: DeviceRegistryRepository
 ) : JessRepository {
     private val _liveState = MutableStateFlow(JessLiveState.IDLE)
     override val liveState: StateFlow<JessLiveState> = _liveState.asStateFlow()
 
-    private val _connectionState = MutableStateFlow(LiveConnectionState.CONNECTED)
+    // HTTP chat can be available independently of the Gemini Live audio session.
+    // Do not report a live voice connection until the Android WebSocket client
+    // and lease coordination have actually been implemented.
+    private val _connectionState = MutableStateFlow(LiveConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<LiveConnectionState> = _connectionState.asStateFlow()
 
-    private val _activeLeaseClient = MutableStateFlow<String?>("android")
+    private val _activeLeaseClient = MutableStateFlow<String?>(null)
     override val activeLeaseClient: StateFlow<String?> = _activeLeaseClient.asStateFlow()
 
     override suspend fun startVoiceSession(): Boolean {
-        _connectionState.value = LiveConnectionState.CONNECTING
-        delay(400)
-        _activeLeaseClient.value = "android"
-        _connectionState.value = LiveConnectionState.CONNECTED
-        _liveState.value = JessLiveState.LISTENING
-        return true
+        _connectionState.value = LiveConnectionState.ERROR
+        _liveState.value = JessLiveState.ERROR
+        _activeLeaseClient.value = null
+        return false
     }
 
     override suspend fun endVoiceSession() {
         _liveState.value = JessLiveState.IDLE
         _connectionState.value = LiveConnectionState.DISCONNECTED
+        _activeLeaseClient.value = null
     }
 
     override suspend fun setLiveState(state: JessLiveState) {
@@ -393,53 +330,113 @@ class JessRepositoryImpl(
     }
 
     override suspend fun sendPrompt(prompt: String, targetDeviceId: String?): Flow<String> = flow {
+        require(prompt.isNotBlank()) { "Enter a message for Jess." }
         _liveState.value = JessLiveState.THINKING
-        delay(400)
 
-        val target = targetDeviceId ?: deviceRegistryRepository.currentTargetDevice.value?.deviceId ?: "android-device-01"
-        val isWindowsTarget = target.contains("win")
+        try {
+            val answer = withContext(Dispatchers.IO) {
+                val idToken = authRepository.getIdToken()
+                    ?: throw IllegalStateException("Your Hub-Mind sign-in session is unavailable. Sign in again.")
 
-        // Parse command intent
-        val lower = prompt.lowercase()
-        val isDeviceCommand = isWindowsTarget && (
-            lower.contains("open") || lower.contains("launch") || lower.contains("run") ||
-            lower.contains("volume") || lower.contains("screenshot") || lower.contains("pc") ||
-            lower.contains("window") || lower.contains("diagnostics") || lower.contains("battery")
-        )
+                val baseUrl = BuildConfig.HUBMIND_API_BASE_URL.trimEnd('/')
+                if (!baseUrl.startsWith("https://")) {
+                    throw IllegalStateException("Hub-Mind API must use HTTPS.")
+                }
 
-        if (isDeviceCommand) {
-            val toolName = when {
-                lower.contains("screenshot") -> "take_windows_screenshot"
-                lower.contains("volume") -> "control_system_volume"
-                lower.contains("calc") -> "launch_windows_application"
-                lower.contains("code") || lower.contains("vs") -> "launch_windows_application"
-                lower.contains("diag") || lower.contains("info") -> "get_windows_system_info"
-                else -> "manage_windows"
+                val conversation = conversationRepository.currentConversation.value
+                val priorMessages = conversation?.let {
+                    conversationRepository.getMessages(it.id).first()
+                }.orEmpty().takeLast(80)
+
+                val messageArray = JSONArray()
+                priorMessages.forEach { message ->
+                    if (message.text.isNotBlank()) {
+                        messageArray.put(
+                            JSONObject()
+                                .put("role", if (message.sender == MessageSender.USER) "user" else "model")
+                                .put("parts", JSONArray().put(JSONObject().put("text", message.text)))
+                        )
+                    }
+                }
+                if (priorMessages.isEmpty() || priorMessages.last().sender != MessageSender.USER ||
+                    priorMessages.last().text != prompt
+                ) {
+                    messageArray.put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put("parts", JSONArray().put(JSONObject().put("text", prompt)))
+                    )
+                }
+
+                val systemInstruction = buildString {
+                    append("You are Jess, the assistant inside the user's Hub-Mind Android application. ")
+                    append("Answer naturally and use the authenticated Hub-Mind backend. ")
+                    append("This Android build does not yet have an operational remote device command transport. ")
+                    append("Never claim that you opened an app, changed a device, read a screen, sent a message, ")
+                    append("or performed another device action unless a real native execution result is supplied. ")
+                    append("When asked to control another device, explain that cross-device execution is not connected yet.")
+                    if (!targetDeviceId.isNullOrBlank()) {
+                        append(" The user's currently selected device ID is ")
+                        append(targetDeviceId)
+                        append(", but selection alone does not prove that the device is online or controllable.")
+                    }
+                }
+
+                val requestBody = JSONObject()
+                    .put("messages", messageArray)
+                    .put("systemInstruction", systemInstruction)
+                    .put("autoSearch", false)
+
+                val connection = (URL(baseUrl + "/api/chat").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 60000
+                    doOutput = true
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Authorization", "Bearer " + idToken)
+                }
+
+                try {
+                    connection.outputStream.use { output ->
+                        output.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+                    }
+
+                    val statusCode = connection.responseCode
+                    val responseStream = if (statusCode in 200..299) {
+                        connection.inputStream
+                    } else {
+                        connection.errorStream
+                    }
+                    val responseBody = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    val responseJson = runCatching { JSONObject(responseBody) }.getOrNull()
+
+                    if (statusCode !in 200..299) {
+                        val detail = responseJson?.optString("text")
+                            ?.takeIf { it.isNotBlank() }
+                            ?: responseJson?.optString("error")?.takeIf { it.isNotBlank() }
+                            ?: "Hub-Mind backend returned HTTP " + statusCode + "."
+                        throw IllegalStateException(detail)
+                    }
+
+                    responseJson?.optString("text")?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("Jess backend returned an empty response.")
+                } finally {
+                    connection.disconnect()
+                }
             }
-            val args = mapOf("appName" to if (lower.contains("calc")) "calc.exe" else "code.exe")
 
-            emit("Coordinating with your registered Windows workstation...")
-            delay(300)
-            val result = deviceControlRepository.executeTool(target, toolName, args)
-
+            _connectionState.value = LiveConnectionState.CONNECTED
             _liveState.value = JessLiveState.SPEAKING
-            val reply = if (result.success) {
-                "Executed $toolName on your Windows PC with verification. ${result.output ?: "Action completed successfully."}"
-            } else {
-                "Tried executing $toolName on Windows, but encountered: ${result.error ?: "Session unavailable."}"
-            }
-            emit(reply)
-        } else {
-            _liveState.value = JessLiveState.SPEAKING
-            val reply = "I'm with you. For Jaystarbliss Studios operations, your tasks and documents are synced. What would you like to coordinate across your Android and Windows workspace?"
-            emit(reply)
+            emit(answer)
+            _liveState.value = JessLiveState.IDLE
+        } catch (error: Exception) {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            throw error
         }
-
-        delay(800)
-        _liveState.value = JessLiveState.IDLE
     }
 }
-
 class DeviceRegistryRepositoryImpl(private val context: Context) : DeviceRegistryRepository {
     private fun buildLocalDevice(): DeviceNode {
         val androidId = android.provider.Settings.Secure.getString(
