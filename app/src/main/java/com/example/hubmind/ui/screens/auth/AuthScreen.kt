@@ -143,7 +143,7 @@ fun AuthScreen(
             // Primary Sign In Button
             Button(
                 onClick = viewModel::signIn,
-                enabled = !state.isLoading && state.email.isNotBlank(),
+                enabled = !state.isLoading && state.email.isNotBlank() && state.password.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
@@ -168,7 +168,7 @@ fun AuthScreen(
             // Google Sign-In Alternate
             OutlinedButton(
                 onClick = viewModel::signInWithGoogle,
-                enabled = !state.isLoading,
+                enabled = false,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
@@ -177,13 +177,13 @@ fun AuthScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate200)
             ) {
-                Text("Continue with Google Workspace", fontWeight = FontWeight.Medium)
+                Text("Google sign-in not configured yet", fontWeight = FontWeight.Medium)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Private native build for Jaystarbliss Studios. Connects to existing Firestore collections and Windows desktop device agent.",
+                text = "Private native Hub-Mind build. Sign in with your existing account; Android device and cross-device services are being connected.",
                 style = MaterialTheme.typography.labelSmall,
                 color = Slate500,
                 textAlign = TextAlign.Center,
