@@ -1,11 +1,13 @@
 package com.example.hubmind
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.PermissionRequest
@@ -136,7 +138,29 @@ class HubMindWebViewActivity : ComponentActivity() {
             webView.restoreState(savedInstanceState)
         } else {
             webView.loadUrl(HUBMIND_URL)
+            showAccessibilitySetupPromptIfNeeded()
         }
+    }
+
+
+    private fun showAccessibilitySetupPromptIfNeeded() {
+        val prefs = getSharedPreferences("hubmind_native", MODE_PRIVATE)
+        if (prefs.getBoolean("accessibility_prompt_shown", false) || isAccessibilityServiceEnabled()) return
+        prefs.edit().putBoolean("accessibility_prompt_shown", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("Enable Jess phone controls")
+            .setMessage("To let Jess interact with apps on this phone, Android requires you to enable Hub-Mind Accessibility manually. This permission can expose the active screen's visible UI and perform taps, swipes and text entry when you explicitly ask. You can revoke it at any time in Android Settings. It does not let Jess bypass your PIN, biometrics or protected screens.")
+            .setPositiveButton("Open accessibility settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setNegativeButton("Not now", null)
+            .show()
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        val expected = android.content.ComponentName(this, com.example.hubmind.agent.HubMindAccessibilityService::class.java).flattenToString()
+        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
