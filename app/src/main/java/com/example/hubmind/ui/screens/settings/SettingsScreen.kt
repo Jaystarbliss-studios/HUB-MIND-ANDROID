@@ -127,7 +127,7 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Active Device Control Session", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.Bold)
-                            Text("Runs foreground service with notification for live background actions", style = MaterialTheme.typography.bodySmall, color = Slate400)
+                            Text("Keeps a visible Android service active while this session is enabled. Remote control is not connected yet.", style = MaterialTheme.typography.bodySmall, color = Slate400)
                         }
                         Switch(
                             checked = state.isForegroundSessionActive,
@@ -142,6 +142,10 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = if (state.isAccessibilityConnected) Green400 else Amber400
                     )
+
+                    state.sessionNotice?.let { notice ->
+                        Text(notice, style = MaterialTheme.typography.bodySmall, color = Amber400)
+                    }
 
                     Divider(color = Slate800, thickness = 1.dp)
 
