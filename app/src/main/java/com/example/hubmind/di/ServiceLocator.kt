@@ -23,12 +23,13 @@ object ServiceLocator {
     }
 
     val deviceControlRepository: DeviceControlRepository by lazy {
-        DeviceControlRepositoryImpl(emptyList())
+        DeviceControlRepositoryImpl(emptyList(), deviceRegistryRepository)
     }
 
     val jessRepository: JessRepository by lazy {
         JessRepositoryImpl(
             conversationRepository = conversationRepository,
+            authRepository = authRepository,
             deviceControlRepository = deviceControlRepository,
             deviceRegistryRepository = deviceRegistryRepository
         )
