@@ -6,8 +6,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- Runtime permissions -->
@@ -15,7 +13,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Private device-control permissions -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name="com.example.hubmind.HubMindApp"
@@ -55,16 +52,6 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
-        </service>
-
-        <!-- Active Control Foreground Service -->
-        <service
-            android:name="com.example.hubmind.agent.HubMindAgentForegroundService"
-            android:foregroundServiceType="specialUse"
-            android:exported="false">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-requested Hub-Mind cross-device control session" />
         </service>
 
         <!-- Jess voice input/output is provided by the authenticated Hub-Mind Live session in the app WebView. -->
