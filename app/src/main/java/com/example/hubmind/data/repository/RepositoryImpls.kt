@@ -385,7 +385,7 @@ class JessRepositoryImpl(
                 val requestBody = JSONObject()
                     .put("messages", messageArray)
                     .put("systemInstruction", systemInstruction)
-                    .put("autoSearch", false)
+                    .put("autoSearch", true)
 
                 val connection = (URL(baseUrl + "/api/chat").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
