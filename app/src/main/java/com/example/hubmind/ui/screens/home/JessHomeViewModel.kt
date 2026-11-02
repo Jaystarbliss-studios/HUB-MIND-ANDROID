@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.hubmind.data.model.*
+import com.example.hubmind.data.HubMindMemoryContext
 import com.example.hubmind.data.repository.AuthRepository
 import com.example.hubmind.data.repository.ConversationRepository
 import com.example.hubmind.data.repository.DeviceRegistryRepository
@@ -182,10 +183,29 @@ class JessHomeViewModel(
                     foregroundStartedForVoice = HubMindAgentForegroundService.startService(appContext)
                 }
                 val user = authRepository.currentUser.value
+                val recentMessages = _uiState.value.currentConversation?.let { conversation ->
+                    conversationRepository.getMessages(conversation.id).first()
+                }.orEmpty().takeLast(20)
+                val memories = user?.id?.let { HubMindMemoryContext.load(it) }.orEmpty()
+                val sharedContext = buildString {
+                    if (memories.isNotBlank()) {
+                        append("Saved Hub-Mind user memories:\\n")
+                        append(memories)
+                    }
+                    if (recentMessages.isNotEmpty()) {
+                        append("\\n\\nRecent shared Jess conversation:\\n")
+                        recentMessages.forEach { message ->
+                            append(if (message.sender == MessageSender.USER) "User: " else "Jess: ")
+                            append(message.text)
+                            append("\\n")
+                        }
+                    }
+                }
                 val started = liveVoiceSession.connect(
                     userName = user?.preferredName?.takeIf { it.isNotBlank() }
                         ?: user?.displayName.orEmpty(),
-                    userRole = user?.role.orEmpty()
+                    userRole = user?.role.orEmpty(),
+                    systemContext = sharedContext
                 )
                 if (!started && foregroundStartedForVoice) {
                     HubMindAgentForegroundService.stopService(appContext)
