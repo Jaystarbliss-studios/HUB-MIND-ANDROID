@@ -115,7 +115,9 @@ class MainActivity : ComponentActivity() {
                                                 JessHomeViewModel(
                                                     jessRepository = ServiceLocator.jessRepository,
                                                     conversationRepository = ServiceLocator.conversationRepository,
-                                                    deviceRegistryRepository = ServiceLocator.deviceRegistryRepository
+                                                    deviceRegistryRepository = ServiceLocator.deviceRegistryRepository,
+                                                    authRepository = ServiceLocator.authRepository,
+                                                    context = applicationContext
                                                 )
                                             }
                                             JessHomeScreen(viewModel = jessViewModel)
