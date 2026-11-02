@@ -9,9 +9,11 @@ import com.example.hubmind.data.repository.ConversationRepository
 import com.example.hubmind.data.repository.DeviceRegistryRepository
 import com.example.hubmind.data.repository.JessRepository
 import com.example.hubmind.agent.HubMindAgentForegroundService
+import com.example.hubmind.agent.AndroidLiveToolExecutor
 import com.example.hubmind.voice.GeminiLiveVoiceSession
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 data class JessHomeUiState(
     val currentConversation: Conversation? = null,
@@ -39,6 +41,7 @@ class JessHomeViewModel(
 
     private val appContext = context.applicationContext
     private var foregroundStartedForVoice = false
+    private val androidToolExecutor = AndroidLiveToolExecutor(appContext)
     private var pendingLiveUserText = ""
     private val pendingLiveAssistantText = StringBuilder()
 
@@ -63,6 +66,19 @@ class JessHomeViewModel(
         },
         onTurnComplete = {
             viewModelScope.launch { persistLiveTurn() }
+        },
+        onToolCall = { name, id, args ->
+            viewModelScope.launch {
+                val result = androidToolExecutor.execute(name, args)
+                if (!liveVoiceSession.sendToolResponse(id, name, result)) {
+                    _uiState.update { it.copy(noticeMessage = "Android completed a tool request, but Jess could not receive its result.") }
+                } else if (!result.optBoolean("success")) {
+                    _uiState.update { it.copy(noticeMessage = result.optString("error", "The Android action could not be completed.")) }
+                } else {
+                    val summary = result.optString("output").ifBlank { "Android action completed." }
+                    _uiState.update { it.copy(noticeMessage = summary) }
+                }
+            }
         },
         onError = { message ->
             _uiState.update { it.copy(noticeMessage = message) }
