@@ -56,7 +56,7 @@ object ServiceLocator {
     }
 
     val conversationRepository: ConversationRepository by lazy {
-        ConversationRepositoryImpl()
+        FirestoreConversationRepositoryImpl(requireNotNull(appContext), authRepository)
     }
 
     val deviceRegistryRepository: DeviceRegistryRepository by lazy {
