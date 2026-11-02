@@ -6,6 +6,7 @@ enum class AndroidActionType {
     TAP,
     DOUBLE_TAP,
     LONG_PRESS,
+    CLICK_UI_ELEMENT,
     SWIPE,
     SCROLL,
     TYPE_TEXT,
@@ -66,6 +67,8 @@ data class AndroidActionResult(
     val error: String? = null,
     val hierarchy: UiNodeInfo? = null,
     val installedApps: List<AppInfo>? = null,
+    val screenshotBase64: String? = null,
+    val screenshotMimeType: String? = null,
     val durationMs: Long = 0,
     val timestamp: Long = System.currentTimeMillis()
 )
