@@ -73,12 +73,7 @@ interface PermissionStatusRepository {
     val hasPostNotifications: StateFlow<Boolean>
     val hasSystemAlertWindow: StateFlow<Boolean>
     val hasAccessibilityService: StateFlow<Boolean>
-    fun updatePermissions(
-        audio: Boolean,
-        notifications: Boolean,
-        overlay: Boolean,
-        accessibility: Boolean
-    )
+    fun refresh()
 }
 
 interface VoiceInteractionRepository {
