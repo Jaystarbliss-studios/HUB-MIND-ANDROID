@@ -14,6 +14,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -62,11 +63,14 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
     override val isSessionValid: StateFlow<Boolean> = _isSessionValid.asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var profileListener: ListenerRegistration? = null
 
     init {
         firebaseAuth?.addAuthStateListener { auth ->
             val firebaseUser = auth.currentUser
             if (firebaseUser == null) {
+                profileListener?.remove()
+                profileListener = null
                 _currentUser.value = null
                 _isSessionValid.value = false
             } else {
@@ -74,7 +78,8 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
                     runCatching { loadAuthorizedProfile(firebaseUser) }
                         .onSuccess { profile ->
                             _currentUser.value = profile
-                            _isSessionValid.value = profile != null
+                            _isSessionValid.value = true
+                            observeProfileChanges(firebaseUser)
                         }
                         .onFailure {
                             _currentUser.value = null
@@ -83,6 +88,37 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
                 }
             }
         }
+    }
+
+    private fun observeProfileChanges(firebaseUser: FirebaseUser) {
+        val db = firestore ?: return
+        profileListener?.remove()
+        profileListener = db.collection("users")
+            .document(firebaseUser.uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _currentUser.value = null
+                    _isSessionValid.value = false
+                    return@addSnapshotListener
+                }
+                if (snapshot == null || !snapshot.exists()) {
+                    _currentUser.value = null
+                    _isSessionValid.value = false
+                    firebaseAuth?.signOut()
+                    return@addSnapshotListener
+                }
+
+                val data = snapshot.data.orEmpty()
+                val status = (data["status"] as? String).orEmpty()
+                if (status == "inactive" || status == "suspended") {
+                    _currentUser.value = null
+                    _isSessionValid.value = false
+                    return@addSnapshotListener
+                }
+
+                _currentUser.value = mapAuthorizedProfile(data, firebaseUser)
+                _isSessionValid.value = true
+            }
     }
 
     override suspend fun signIn(email: String, password: String): Result<User> {
@@ -193,8 +229,13 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
             throw IllegalStateException("Your Hub-Mind account is currently inactive. Contact an administrator.")
         }
 
+        return mapAuthorizedProfile(data, firebaseUser)
+    }
+
+    private fun mapAuthorizedProfile(data: Map<String, Any>, firebaseUser: FirebaseUser): User {
+        val email = firebaseUser.email?.trim()?.lowercase().orEmpty()
         return User(
-            id = uid,
+            id = firebaseUser.uid,
             email = email,
             displayName = (data["displayName"] as? String)
                 ?: (data["name"] as? String)
@@ -202,7 +243,7 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
                 ?: email.substringBefore("@"),
             preferredName = data["preferredName"] as? String ?: "",
             role = data["role"] as? String ?: "staff",
-            status = status,
+            status = data["status"] as? String ?: "active",
             photoUrl = firebaseUser.photoUrl?.toString() ?: data["photoUrl"] as? String,
             phone = data["phone"] as? String,
             lastSeenAt = java.time.Instant.now().toString()
