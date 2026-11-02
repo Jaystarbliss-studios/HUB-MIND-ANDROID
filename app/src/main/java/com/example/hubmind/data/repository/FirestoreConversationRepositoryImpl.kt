@@ -18,9 +18,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -136,12 +135,11 @@ class FirestoreConversationRepositoryImpl(
             "updatedAt" to now,
             "isLiveSession" to false
         )
-        runCatching {
-            firestore.collection("users").document(userId)
-                .collection("conversations").document(id).set(document).await()
-        }.onFailure {
-            android.util.Log.w("HubMindConversations", "Conversation is local until Firestore is reachable: ${it.message}")
-        }
+        firestore.collection("users").document(userId)
+            .collection("conversations").document(id).set(document)
+            .addOnFailureListener {
+                android.util.Log.w("HubMindConversations", "Conversation is local until Firestore is reachable: ${it.message}")
+            }
         return conversation
     }
 
@@ -206,13 +204,11 @@ class FirestoreConversationRepositoryImpl(
         )
         val ref = firestore.collection("users").document(userId)
             .collection("conversations").document(conversationId)
-        runCatching {
-            ref.update(
-                "messages", FieldValue.arrayUnion(payload),
-                "messageCount", FieldValue.increment(1),
-                "updatedAt", Instant.now().toString()
-            ).await()
-        }.onFailure {
+        ref.update(
+            "messages", FieldValue.arrayUnion(payload),
+            "messageCount", FieldValue.increment(1),
+            "updatedAt", Instant.now().toString()
+        ).addOnFailureListener {
             android.util.Log.w("HubMindConversations", "Could not sync conversation message: ${it.message}")
         }
     }
