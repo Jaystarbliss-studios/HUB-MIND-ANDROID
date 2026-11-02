@@ -46,7 +46,10 @@ class JessHomeViewModel(
     private var pendingLiveUserText = ""
     private val pendingLiveAssistantText = StringBuilder()
 
-    private val liveVoiceSession: GeminiLiveVoiceSession = GeminiLiveVoiceSession(
+    private lateinit var liveVoiceSession: GeminiLiveVoiceSession
+
+    init {
+        liveVoiceSession = GeminiLiveVoiceSession(
         context = appContext,
         authRepository = authRepository,
         onConnectionState = { connection ->
@@ -91,7 +94,6 @@ class JessHomeViewModel(
         }
     )
 
-    init {
         viewModelScope.launch {
             withTimeoutOrNull(10_000) { conversationRepository.awaitReady() }
             if (conversationRepository.currentConversation.value == null) {
