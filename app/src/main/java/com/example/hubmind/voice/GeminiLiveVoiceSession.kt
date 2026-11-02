@@ -368,7 +368,12 @@ class GeminiLiveVoiceSession(
     }
 
     fun dispose() {
-        scope.launch { disconnect() }
+        if (isClosed.compareAndSet(false, true)) {
+            isReady.set(false)
+            stopAudio()
+            socket?.close(1000, "Jess Live owner was disposed")
+            socket = null
+        }
         scope.cancel()
         client.dispatcher.executorService.shutdown()
     }
