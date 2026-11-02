@@ -5,9 +5,10 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!-- Emulator-only HTTP targets for local development. Production traffic
+         must use HTTPS; do not whitelist a personal LAN address here. -->
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">192.168.1.185</domain>
+        <domain>localhost</domain>
+        <domain>10.0.2.2</domain>
     </domain-config>
 </network-security-config>
