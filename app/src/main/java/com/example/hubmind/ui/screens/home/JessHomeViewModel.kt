@@ -146,8 +146,14 @@ class JessHomeViewModel(
     fun switchTargetDevice() {
         viewModelScope.launch {
             val list = deviceRegistryRepository.devices.value
+            if (list.size <= 1) {
+                _uiState.value = _uiState.value.copy(
+                    noticeMessage = "Only this Android phone is registered in the current build. Connect the Windows agent and device registry before switching targets."
+                )
+                return@launch
+            }
             val current = _uiState.value.targetDevice
-            val next = list.firstOrNull { it.deviceId != current?.deviceId } ?: list.firstOrNull()
+            val next = list.firstOrNull { it.deviceId != current?.deviceId }
             next?.let { deviceRegistryRepository.selectTargetDevice(it.deviceId) }
         }
     }
