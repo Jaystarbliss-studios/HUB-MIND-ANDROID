@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.util.UUID
@@ -74,9 +75,9 @@ object KeystorePairingManager {
             val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             val cert = keyStore.getCertificate(KEY_ALIAS)
-            cert?.publicKey?.encoded?.take(8)?.joinToString("") { "%02x".format(it) } ?: "hw-sec-key"
+            cert?.publicKey?.encoded?.take(8)?.joinToString("") { "%02x".format(it) }.orEmpty()
         } catch (e: Exception) {
-            "hw-sec-key"
+            ""
         }
     }
 }
@@ -91,19 +92,15 @@ interface HubMindControlPlaneTransport {
 }
 
 class HubMindControlPlaneTransportImpl : HubMindControlPlaneTransport {
-    private val _isConnected = MutableStateFlow(true)
+    private val _isConnected = MutableStateFlow(false)
     override val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
-    private val _incomingCommands = MutableStateFlow<CommandEnvelope?>(null)
-    override val incomingCommands: Flow<CommandEnvelope> = kotlinx.coroutines.flow.flow {
-        _incomingCommands.collect { cmd ->
-            if (cmd != null) emit(cmd)
-        }
-    }
+    override val incomingCommands: Flow<CommandEnvelope> = emptyFlow()
 
     override suspend fun connect(userId: String, deviceId: String) {
-        _isConnected.value = true
-        KeystorePairingManager.generateDeviceKeyPair()
+        // The control-plane WebSocket endpoint has not been implemented in this
+        // Android client yet. A locally generated key is not a network pairing.
+        _isConnected.value = false
     }
 
     override suspend fun disconnect() {
@@ -111,29 +108,26 @@ class HubMindControlPlaneTransportImpl : HubMindControlPlaneTransport {
     }
 
     override suspend fun dispatchCommand(envelope: CommandEnvelope): CommandResult {
-        // Expiration check
-        if (envelope.expirationTime < System.currentTimeMillis()) {
+        if (envelope.expirationTime <= System.currentTimeMillis()) {
             return CommandResult(
                 success = false,
+                verified = false,
                 error = "Command envelope expired before dispatch.",
                 durationMs = 0
             )
         }
-
-        kotlinx.coroutines.delay(300)
         return CommandResult(
-            success = true,
-            verified = true,
-            output = "Target ${envelope.targetDeviceId} executed ${envelope.actionType} successfully.",
-            durationMs = 300
+            success = false,
+            verified = false,
+            error = "No authenticated Hub-Mind control-plane connection is implemented. No remote command was sent.",
+            durationMs = 0
         )
     }
 
     override suspend fun reportProgress(commandId: String, state: CommandLifecycle, details: String) {
-        // Report state change to control plane
+        // No progress event can be delivered before the authenticated transport exists.
     }
 }
-
 // 11 Internal Jess Device Control Tools
 enum class InternalJessDeviceTool {
     LIST_USER_DEVICES,
@@ -152,12 +146,19 @@ enum class InternalJessDeviceTool {
 object JessDeviceResolver {
     fun resolveDeviceQuery(query: String, devices: List<DeviceNode>): DeviceNode? {
         val lower = query.lowercase()
-        return when {
-            lower.contains("phone") || lower.contains("android") || lower.contains("mobile") ->
-                devices.find { it.platform == com.example.hubmind.data.model.DevicePlatform.ANDROID }
-            lower.contains("laptop") || lower.contains("pc") || lower.contains("computer") || lower.contains("windows") ->
-                devices.find { it.platform == com.example.hubmind.data.model.DevicePlatform.WINDOWS }
-            else -> devices.firstOrNull { lower.contains(it.deviceName.lowercase()) } ?: devices.firstOrNull()
+        val wantsPhone = lower.contains("phone") || lower.contains("android") || lower.contains("mobile")
+        val wantsComputer = lower.contains("laptop") || lower.contains("pc") ||
+            lower.contains("computer") || lower.contains("windows")
+
+        if (wantsPhone && wantsComputer) return null
+        if (wantsPhone) {
+            return devices.singleOrNull { it.platform == com.example.hubmind.data.model.DevicePlatform.ANDROID }
         }
+        if (wantsComputer) {
+            return devices.singleOrNull { it.platform == com.example.hubmind.data.model.DevicePlatform.WINDOWS }
+        }
+
+        val namedMatches = devices.filter { lower.contains(it.deviceName.lowercase()) }
+        return namedMatches.singleOrNull()
     }
 }
