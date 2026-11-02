@@ -85,6 +85,15 @@ fun JessHomeScreen(
                     else -> "Jess · Ready for Commands"
                 }
 
+                state.noticeMessage?.let { notice ->
+                    Text(
+                        text = notice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber400,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -198,7 +207,7 @@ fun JessHomeScreen(
                     OutlinedTextField(
                         value = state.currentInput,
                         onValueChange = viewModel::onInputChange,
-                        placeholder = { Text("Ask Jess or command Windows PC...", color = Slate500, fontSize = 13.sp) },
+                        placeholder = { Text("Ask Jess...", color = Slate500, fontSize = 13.sp) },
                         singleLine = true,
                         modifier = Modifier
                             .weight(1f)
