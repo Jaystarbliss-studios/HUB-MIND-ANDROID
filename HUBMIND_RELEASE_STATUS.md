@@ -1,24 +1,45 @@
-# Hub-Mind Release Status & Audit Report
+# Hub-Mind Android — Current Release Status
 
-## 1. Operational Status Breakdown
+**As of 2 November 2026**
 
-### Fully Operational Features
-- Native Android application foundation (Kotlin, Jetpack Compose, Material 3, Clean Architecture).
-- Jetpack Compose UI with interactive Jess Orb visualizer, conversation list, devices mesh, activity timeline, and settings.
-- Android Accessibility Service (`HubMindAccessibilityService`) UI hierarchy dumper and gesture controller (taps, swipes, scrolls, text entry).
-- Application launcher (`AndroidAppLauncher`) and system global navigation (`AndroidGlobalActionController`).
-- Native voice interaction pipeline (TextToSpeech, SpeechRecognizer, voice interruption).
-- Android Keystore device pairing (`KeystorePairingManager`) and versioned command protocol (`CommandEnvelope`).
-- Active Control Foreground Service (`HubMindAgentForegroundService`).
-- In-App Private Update Checker (`HubMindUpdateChecker`).
+## Current classification
 
-### Features Requiring Server / Windows Adaptation
-- Express server route addition (`/api/devices/dispatch`) in `server.ts` (documented in `HUBMIND_BACKEND_INTEGRATION_REQUIRED.md`).
-- Electron main process Firestore listener in `electron/main.cjs` (documented in `HUBMIND_WINDOWS_INTEGRATION_REQUIRED.md`).
+**Private Android prototype — not ready for general installation yet.**
 
----
+The code has been audited and misleading demo-success behaviour is being removed. The app is not yet an operational replacement for the web/Windows Hub-Mind platform.
 
-## 2. Release Verification
+## Present in source
+- Native Kotlin/Compose application structure.
+- Firebase email/password integration code.
+- Authenticated text-chat client for the existing Hub-Mind `/api/chat` endpoint.
+- Native AccessibilityService and gesture execution helpers.
+- Local Android device information and capability reporting.
+- Safer release signing configuration.
+- Private APK update download/checksum helper.
+- GitHub Actions Android build and unit-test job.
 
-- `compile_applet`: **Build Succeeded**
-- Architecture Unit Tests: **All Passed**
+## Not yet complete or verified
+- Android Firebase app registration/config file.
+- Live Firebase authentication test.
+- Live Gemini text backend test.
+- Native Google sign-in.
+- Gemini Live voice and audio streaming.
+- Firestore conversation and memory synchronisation.
+- Full MediaProjection frame capture.
+- Authenticated device registration/heartbeat.
+- Remote control transport.
+- Windows agent command receiver.
+- Shizuku advanced control.
+- Private APK update UI and website deployment.
+- Physical-device accessibility/gesture tests.
+- Owner-controlled release keystore.
+
+## Release gate
+Do not create a production APK until:
+1. GitHub Actions Android build and unit tests pass.
+2. Firebase Android app config has been added locally.
+3. Text chat has been tested against the live Hub-Mind backend.
+4. Local accessibility actions have been tested on a physical Android phone.
+5. The owner has generated and backed up the permanent release signing key.
+
+Cross-device use must remain disabled until backend and Windows-agent integration is implemented and tested.
