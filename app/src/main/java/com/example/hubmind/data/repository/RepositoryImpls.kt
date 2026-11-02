@@ -3,6 +3,7 @@ package com.example.hubmind.data.repository
 import android.content.Context
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.Build
 import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
@@ -440,112 +441,83 @@ class JessRepositoryImpl(
 }
 
 class DeviceRegistryRepositoryImpl(private val context: Context) : DeviceRegistryRepository {
-    private val androidNode = DeviceNode(
-        deviceId = "android-pixel-01",
-        deviceName = "Hub-Mind Android Phone",
-        platform = DevicePlatform.ANDROID,
-        clientVersion = "2.4.0-native",
-        status = DeviceStatus.ONLINE,
-        isCurrentDevice = true,
-        fullControlActive = true,
-        permissionMode = "allow-routine",
-        capabilities = listOf(
-            DeviceCapability.ANDROID_ACCESSIBILITY,
-            DeviceCapability.MEDIA_STREAMING,
-            DeviceCapability.NOTIFICATION_LISTENER,
-            DeviceCapability.CAMERA_CAPTURE,
-            DeviceCapability.STORAGE_MANAGEMENT
-        ),
-        batteryPercent = 88,
-        ipAddress = "192.168.1.185"
-    )
+    private fun buildLocalDevice(): DeviceNode {
+        val androidId = android.provider.Settings.Secure.getString(
+            context.contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID
+        )?.takeIf { it.isNotBlank() } ?: "unknown"
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val battery = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            ?.takeIf { it in 0..100 }
+        val capabilities = buildList {
+            add(DeviceCapability.APP_LAUNCH)
+            if (HubMindAccessibilityService.isServiceConnected) {
+                add(DeviceCapability.ANDROID_ACCESSIBILITY)
+                add(DeviceCapability.WINDOW_MANAGEMENT)
+                add(DeviceCapability.MOUSE_KEYBOARD_INPUT)
+                add(DeviceCapability.SCREEN_READING)
+            }
+        }
 
-    private val windowsNode = DeviceNode(
-        deviceId = "win-main-workstation",
-        deviceName = "ThinkPad P1 Gen 6 (Windows 11)",
-        platform = DevicePlatform.WINDOWS,
-        clientVersion = "2.4.0-desktop",
-        status = DeviceStatus.ONLINE,
-        isCurrentDevice = false,
-        fullControlActive = true,
-        permissionMode = "allow-routine",
-        capabilities = listOf(
-            DeviceCapability.WINDOW_MANAGEMENT,
-            DeviceCapability.MOUSE_KEYBOARD_INPUT,
-            DeviceCapability.SCREEN_READING,
-            DeviceCapability.APP_LAUNCH,
-            DeviceCapability.POWERSHELL_EXECUTION,
-            DeviceCapability.CHROME_AUTOMATION,
-            DeviceCapability.STORAGE_MANAGEMENT
-        ),
-        batteryPercent = 94,
-        ipAddress = "192.168.1.142"
-    )
+        return DeviceNode(
+            deviceId = "android-$androidId",
+            deviceName = listOf(Build.MANUFACTURER, Build.MODEL)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString(" ")
+                .ifBlank { "Android device" },
+            platform = DevicePlatform.ANDROID,
+            clientVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            }.getOrDefault("unknown"),
+            status = DeviceStatus.ONLINE,
+            isCurrentDevice = true,
+            fullControlActive = HubMindAccessibilityService.isServiceConnected,
+            permissionMode = "ask",
+            capabilities = capabilities,
+            batteryPercent = battery
+        )
+    }
 
-    private val _devices = MutableStateFlow<List<DeviceNode>>(listOf(androidNode, windowsNode))
+    private val localDevice = buildLocalDevice()
+    private val _devices = MutableStateFlow(listOf(localDevice))
     override val devices: StateFlow<List<DeviceNode>> = _devices.asStateFlow()
 
-    private val _currentTargetDevice = MutableStateFlow<DeviceNode?>(windowsNode)
+    private val _currentTargetDevice = MutableStateFlow<DeviceNode?>(localDevice)
     override val currentTargetDevice: StateFlow<DeviceNode?> = _currentTargetDevice.asStateFlow()
 
     override suspend fun selectTargetDevice(deviceId: String) {
-        _currentTargetDevice.value = _devices.value.find { it.deviceId == deviceId }
+        _currentTargetDevice.value = _devices.value.firstOrNull { it.deviceId == deviceId }
     }
 
     override suspend fun registerCurrentDevice(androidNode: DeviceNode) {
-        _devices.value = _devices.value.filter { it.deviceId != androidNode.deviceId } + androidNode
+        if (androidNode.platform != DevicePlatform.ANDROID || !androidNode.isCurrentDevice) {
+            throw IllegalArgumentException("Only the current Android endpoint may register itself through this local registry.")
+        }
+        _devices.value = _devices.value.filterNot { it.deviceId == androidNode.deviceId } + androidNode
     }
 
     override suspend fun pingDevice(deviceId: String): Boolean {
-        delay(350)
-        return true
+        val device = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return false
+        return device.isCurrentDevice && device.status == DeviceStatus.ONLINE
     }
 
     override suspend fun refreshDevices() {
-        delay(200)
+        val refreshed = buildLocalDevice()
+        _devices.value = listOf(refreshed)
+        if (_currentTargetDevice.value?.deviceId == refreshed.deviceId || _currentTargetDevice.value == null) {
+            _currentTargetDevice.value = refreshed
+        }
     }
 }
-
 class DeviceControlRepositoryImpl(
-    private val transports: List<ControlTransport>
+    private val transports: List<ControlTransport>,
+    private val deviceRegistryRepository: DeviceRegistryRepository
 ) : DeviceControlRepository {
     private val _commandHistory = MutableStateFlow<List<DeviceCommand>>(emptyList())
     override val commandHistory: StateFlow<List<DeviceCommand>> = _commandHistory.asStateFlow()
 
-    private val _activityRecords = MutableStateFlow<List<ActivityRecord>>(
-        listOf(
-            ActivityRecord(
-                id = "act-01",
-                title = "Launch Visual Studio Code",
-                details = "Executed launch_windows_application on ThinkPad P1 Gen 6",
-                targetDevice = "ThinkPad P1 Gen 6",
-                status = CommandStatus.COMPLETED,
-                timestamp = System.currentTimeMillis() - 1200000,
-                durationMs = 412,
-                verified = true
-            ),
-            ActivityRecord(
-                id = "act-02",
-                title = "Query System Diagnostic Telemetry",
-                details = "Retrieved RAM, CPU, and storage status over local subnet RPC",
-                targetDevice = "ThinkPad P1 Gen 6",
-                status = CommandStatus.COMPLETED,
-                timestamp = System.currentTimeMillis() - 1790000,
-                durationMs = 188,
-                verified = true
-            ),
-            ActivityRecord(
-                id = "act-03",
-                title = "Take Full Display Screenshot",
-                details = "Captured primary monitor (3840x2400) via GDI bridge",
-                targetDevice = "ThinkPad P1 Gen 6",
-                status = CommandStatus.COMPLETED,
-                timestamp = System.currentTimeMillis() - 3600000,
-                durationMs = 620,
-                verified = true
-            )
-        )
-    )
+    private val _activityRecords = MutableStateFlow<List<ActivityRecord>>(emptyList())
     override val activityRecords: StateFlow<List<ActivityRecord>> = _activityRecords.asStateFlow()
 
     override suspend fun executeTool(
@@ -553,57 +525,109 @@ class DeviceControlRepositoryImpl(
         toolName: String,
         args: Map<String, Any>
     ): CommandResult {
-        val cmdId = "cmd-" + UUID.randomUUID().toString().take(8)
+        val startedAt = System.currentTimeMillis()
+        val cmdId = "cmd-" + UUID.randomUUID().toString()
+        val target = deviceRegistryRepository.devices.value.firstOrNull {
+            it.deviceId == targetDeviceId
+        }
+
         val command = DeviceCommand(
             commandId = cmdId,
-            sourceDeviceId = "android-pixel-01",
+            sourceDeviceId = deviceRegistryRepository.devices.value.firstOrNull { it.isCurrentDevice }?.deviceId
+                ?: "unknown-source",
             targetDeviceId = targetDeviceId,
             toolName = toolName,
             arguments = args,
-            status = CommandStatus.RUNNING,
-            createdAt = System.currentTimeMillis()
+            status = CommandStatus.PENDING,
+            createdAt = startedAt
         )
         _commandHistory.value = listOf(command) + _commandHistory.value
 
-        delay(450)
-        val success = true
-        val result = CommandResult(
-            success = success,
-            verified = true,
-            output = "Target device confirmed tool execution: $toolName with arguments: $args",
-            durationMs = 450
-        )
+        if (target == null) {
+            return finishCommand(
+                command,
+                CommandResult(
+                    success = false,
+                    verified = false,
+                    error = "Target device is not registered or is not currently available to this app.",
+                    durationMs = System.currentTimeMillis() - startedAt
+                )
+            )
+        }
 
-        val completedCmd = command.copy(
-            status = CommandStatus.COMPLETED,
+        val transport = transports.firstOrNull { candidate ->
+            runCatching { candidate.canReachDevice(target) }.getOrDefault(false)
+        }
+
+        if (transport == null) {
+            return finishCommand(
+                command,
+                CommandResult(
+                    success = false,
+                    verified = false,
+                    error = "No authenticated control transport is connected to the target device. No command was sent.",
+                    durationMs = System.currentTimeMillis() - startedAt
+                )
+            )
+        }
+
+        val running = command.copy(status = CommandStatus.RUNNING)
+        _commandHistory.value = _commandHistory.value.map {
+            if (it.commandId == cmdId) running else it
+        }
+
+        val result = runCatching { transport.dispatchCommand(running) }
+            .getOrElse { error ->
+                CommandResult(
+                    success = false,
+                    verified = false,
+                    error = error.message ?: "The target device transport failed.",
+                    durationMs = System.currentTimeMillis() - startedAt
+                )
+            }
+        return finishCommand(running, result.copy(durationMs = System.currentTimeMillis() - startedAt))
+    }
+
+    private fun finishCommand(command: DeviceCommand, result: CommandResult): CommandResult {
+        val finalStatus = when {
+            result.success && result.verified -> CommandStatus.COMPLETED
+            result.success -> CommandStatus.ACKNOWLEDGED
+            else -> CommandStatus.FAILED
+        }
+        val finished = command.copy(
+            status = finalStatus,
             completedAt = System.currentTimeMillis(),
             result = result
         )
-        _commandHistory.value = _commandHistory.value.map { if (it.commandId == cmdId) completedCmd else it }
-
-        val activity = ActivityRecord(
-            id = "act-" + UUID.randomUUID().toString().take(8),
-            title = "Execute $toolName",
-            details = "Dispatched to $targetDeviceId (${args.keys.joinToString()})",
-            targetDevice = targetDeviceId,
-            status = CommandStatus.COMPLETED,
-            timestamp = System.currentTimeMillis(),
-            durationMs = 450,
-            verified = true
-        )
-        _activityRecords.value = listOf(activity) + _activityRecords.value
-
+        _commandHistory.value = _commandHistory.value.map {
+            if (it.commandId == command.commandId) finished else it
+        }
+        _activityRecords.value = listOf(
+            ActivityRecord(
+                id = "act-" + UUID.randomUUID().toString(),
+                title = command.toolName,
+                details = result.error ?: result.output ?: "Command returned without details.",
+                targetDevice = command.targetDeviceId,
+                status = finalStatus,
+                timestamp = System.currentTimeMillis(),
+                durationMs = result.durationMs,
+                verified = result.verified
+            )
+        ) + _activityRecords.value
         return result
     }
 
     override suspend fun cancelCommand(commandId: String): Boolean {
+        val current = _commandHistory.value.firstOrNull { it.commandId == commandId } ?: return false
+        if (current.status in setOf(CommandStatus.COMPLETED, CommandStatus.FAILED, CommandStatus.CANCELLED)) {
+            return false
+        }
         _commandHistory.value = _commandHistory.value.map {
             if (it.commandId == commandId) it.copy(status = CommandStatus.CANCELLED) else it
         }
         return true
     }
 }
-
 class AndroidAgentControllerImpl(private val context: Context) : AndroidAgentController {
     override fun getBatteryLevel(): Int {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
