@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class AuthUiState(
-    val email: String = "johnrufai242@gmail.com",
-    val password: String = "••••••••••••",
+    val email: String = "",
+    val password: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val user: User? = null
@@ -25,6 +25,9 @@ class AuthViewModel(
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
     init {
+        authRepository.configurationError?.let { configurationMessage ->
+            _uiState.value = _uiState.value.copy(errorMessage = configurationMessage)
+        }
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
                 _uiState.value = _uiState.value.copy(user = user)
@@ -59,20 +62,8 @@ class AuthViewModel(
     }
 
     fun signInWithGoogle() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signInWithGoogle("mock-google-token")
-            result.fold(
-                onSuccess = { user ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, user = user)
-                },
-                onFailure = { error ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = error.message ?: "Google sign-in failed."
-                    )
-                }
-            )
-        }
+        _uiState.value = _uiState.value.copy(
+            errorMessage = "Google sign-in is not connected in this Android build yet. Use email and password until Android OAuth is configured."
+        )
     }
 }
