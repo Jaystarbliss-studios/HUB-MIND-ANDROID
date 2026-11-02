@@ -18,7 +18,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.lifecycleScope
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
 import com.example.hubmind.agent.AndroidActionType
@@ -112,11 +112,7 @@ class AndroidNativeBridge(
         }
         host.lifecycleScope.launch {
             try {
-                val googleOption = GetGoogleIdOption.Builder()
-                    .setServerClientId(clientId)
-                    .setFilterByAuthorizedAccounts(false)
-                    .setAutoSelectEnabled(false)
-                    .build()
+                val googleOption = GetSignInWithGoogleOption.Builder(clientId).build()
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleOption)
                     .build()
