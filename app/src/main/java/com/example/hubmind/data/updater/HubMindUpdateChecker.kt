@@ -33,7 +33,13 @@ class HubMindUpdateChecker(private val context: Context) {
 
     private val currentVersionCode: Int
         get() = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt()
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode
+            }
         }.getOrDefault(1)
 
     private val manifestUrl: String
@@ -48,6 +54,7 @@ class HubMindUpdateChecker(private val context: Context) {
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
             connection.requestMethod = "GET"
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/json")
 
             if (connection.responseCode !in 200..299) return@withContext null
@@ -97,6 +104,7 @@ class HubMindUpdateChecker(private val context: Context) {
             connection.connectTimeout = 15000
             connection.readTimeout = 120000
             connection.requestMethod = "GET"
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/vnd.android.package-archive")
 
             val status = connection.responseCode
@@ -185,6 +193,7 @@ class HubMindUpdateChecker(private val context: Context) {
         val configuredHost = URL(BuildConfig.HUBMIND_API_BASE_URL).host
         candidate.protocol == "https" &&
             candidate.host.equals(configuredHost, ignoreCase = true) &&
+            (candidate.port == -1 || candidate.port == 443) &&
             candidate.userInfo == null
     }.getOrDefault(false)
 
