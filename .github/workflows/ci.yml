@@ -1,0 +1,191 @@
+name: HUB-MIND CI
+
+on:
+  push:
+    branches: ["main", "jess-integration-complete", "feat/jess-full-control-parity"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Jess integration verification
+        run: npm run verify:jess
+      - name: TypeScript validation
+        run: npm run typecheck
+      - name: Unit and contract tests
+        run: npm run test:unit
+      - name: Firestore security emulator tests
+        run: npm run test:rules
+      - name: Production build
+        run: npm run build
+
+  validate-native-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Preflight PowerShell syntax
+        shell: pwsh
+        run: |
+          $paths = @('electron/jess-agent.ps1', 'scripts/install-jess-chrome-bridge.ps1')
+          foreach ($relativePath in $paths) {
+            $tokens = $null
+            $errors = $null
+            $fullPath = Join-Path $PWD $relativePath
+            [System.Management.Automation.Language.Parser]::ParseFile($fullPath, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ("{0}:{1}: {2} near [{3}]" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message, $_.Extent.Text) }
+              exit 1
+            }
+          }
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Ensure Windows native build dependencies are installed
+        run: npm install --no-save --include=optional @rollup/rollup-win32-x64-msvc@4.62.4 lightningcss-win32-x64-msvc@1.32.0 @tailwindcss/oxide-win32-x64-msvc@4.3.3
+      - name: Publish self-contained .NET Chrome native host
+        run: dotnet publish native/JessChromeNativeHost/JessChromeNativeHost.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessChromeNativeHost/publish
+      - name: Publish self-contained .NET offline wake helper
+        run: dotnet publish native/JessOfflineWake/JessOfflineWake.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessOfflineWake/publish
+      - name: Publish self-contained .NET Windows OCR helper
+        run: dotnet publish native/JessWindowsOcr/JessWindowsOcr.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessWindowsOcr/publish
+      - name: Validate PowerShell agent and Chrome installer syntax
+        shell: pwsh
+        run: |
+          $paths = @('electron/jess-agent.ps1', 'scripts/install-jess-chrome-bridge.ps1')
+          foreach ($relativePath in $paths) {
+            $tokens = $null
+            $errors = $null
+            $fullPath = Join-Path $PWD $relativePath
+            [System.Management.Automation.Language.Parser]::ParseFile($fullPath, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ("{0}:{1}: {2} near [{3}]" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message, $_.Extent.Text) }
+              exit 1
+            }
+          }
+      - name: TypeScript validation
+        run: npm run typecheck
+      - name: Smoke-test native PowerShell sidecar, storage scan and cleanup confirmation guard
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP ('jess-storage-fixture-' + [Guid]::NewGuid().ToString('N'))
+          $process = $null
+          try {
+            $null = New-Item -ItemType Directory -Path $fixture -Force
+            [System.IO.File]::WriteAllText((Join-Path $fixture 'small.txt'), ('small file fixture' * 100))
+            [System.IO.File]::WriteAllBytes((Join-Path $fixture 'duplicate-one.bin'), [byte[]]::new(32768))
+            [System.IO.File]::WriteAllBytes((Join-Path $fixture 'duplicate-two.bin'), [byte[]]::new(32768))
+            $mediumStream = [System.IO.File]::Open((Join-Path $fixture 'medium.bin'), [System.IO.FileMode]::CreateNew)
+            $mediumStream.SetLength(12MB)
+            $mediumStream.Dispose()
+            $largeStream = [System.IO.File]::Open((Join-Path $fixture 'large.bin'), [System.IO.FileMode]::CreateNew)
+            $largeStream.SetLength(20MB)
+            $largeStream.Dispose()
+            [System.IO.File]::WriteAllText((Join-Path $fixture 'candidate.tmp'), 'temporary candidate fixture')
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = 'powershell.exe'
+            $scriptPath = Join-Path $PWD 'electron\jess-agent.ps1'
+            $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardInput = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            [void]$process.Start()
+
+            $readyLine = $process.StandardOutput.ReadLine()
+            if ([string]::IsNullOrWhiteSpace($readyLine)) { throw 'Native sidecar returned no ready handshake.' }
+            $ready = $readyLine | ConvertFrom-Json -ErrorAction Stop
+            if ($ready.type -ne 'ready') { throw "Native sidecar ready handshake was invalid: $readyLine" }
+
+            $sendRequest = {
+              param($request)
+              $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress -Depth 10))
+              $process.StandardInput.Flush()
+              $line = $process.StandardOutput.ReadLine()
+              if ([string]::IsNullOrWhiteSpace($line)) { throw "Native sidecar returned no response for $($request.id)." }
+              return ($line | ConvertFrom-Json -ErrorAction Stop)
+            }
+
+            $scanResponse = & $sendRequest @{
+              id = 'ci-storage-scan'
+              method = 'filesystem_scan'
+              args = @{ root = $fixture; largeThresholdMB = 15; inactiveDays = 1; maxSeconds = 90; maxFiles = 1000; detectDuplicates = $true }
+            }
+            if ($scanResponse.result.ok -ne $true) { throw "Storage scan failed: $($scanResponse.result.error)" }
+            $scan = $scanResponse.result.evidence
+            if (!$scan.scanId -or $scan.filesScanned -lt 5) { throw "Storage scan returned incomplete fixture data: $($scan.filesScanned) files" }
+            if ($scan.categoryStats.small.count -lt 3 -or $scan.categoryStats.medium.count -lt 1 -or $scan.categoryStats.large.count -lt 1) {
+              throw 'Storage scan size categories did not classify small, medium and large fixture files correctly.'
+            }
+            if (@($scan.duplicateGroups).Count -lt 1 -or @($scan.duplicateGroups[0].candidateIds).Count -lt 1) { throw ('Storage scan did not find duplicate fixtures. Files={0}; sameSizeGroups={1}; hashes={2}; hashBuckets={3}; hashLimit={4}; scanSeconds={5}; partial={6}' -f $scan.filesScanned,$scan.sameSizeGroupsCount,$scan.hashesComputed,$scan.hashBucketsCount,$scan.duplicateHashingLimited,$scan.scanDurationSeconds,$scan.partial) }
+
+            $tempCandidate = @($scan.candidates | Where-Object { $_.path -like '*.tmp' -and $_.cleanupEligible } | Select-Object -First 1)
+            $duplicateCandidateId = [string](@($scan.duplicateGroups[0].candidateIds)[0])
+            if ($tempCandidate.Count -ne 1 -or !$duplicateCandidateId) { throw 'Storage scan did not expose exact temp/duplicate candidate IDs for the cleanup preview.' }
+            $candidateIds = @([string]$tempCandidate[0].candidateId, $duplicateCandidateId)
+            $preview = & $sendRequest @{
+              id = 'ci-storage-clean-preview'
+              method = 'filesystem_clean'
+              args = @{ scanId = $scan.scanId; candidateIds = $candidateIds; previewOnly = $true }
+            }
+            if ($preview.result.ok -ne $true -or $preview.result.evidence.count -ne 2) { throw "Storage cleanup preview failed: $($preview.result.error)" }
+
+            $blockedClean = & $sendRequest @{
+              id = 'ci-storage-clean-confirmation-guard'
+              method = 'filesystem_clean'
+              args = @{ scanId = $scan.scanId; candidateIds = $candidateIds }
+            }
+            if ($blockedClean.result.ok -ne $false -or $blockedClean.result.error -notlike '*confirmation*') {
+              throw 'Storage cleanup did not enforce the trusted desktop confirmation flag.'
+            }
+            foreach ($candidate in $preview.result.evidence.items) {
+              if (!(Test-Path -LiteralPath $candidate.path -PathType Leaf)) { throw "Cleanup guard changed a file without confirmation: $($candidate.path)" }
+            }
+            Write-Output "Storage scan fixture passed: $($scan.filesScanned) files, $(@($scan.duplicateGroups).Count) duplicate group(s), $($preview.result.evidence.count) cleanup candidates guarded."
+          } finally {
+            if ($process) {
+              try { $process.StandardInput.Close() } catch {}
+              if (!$process.HasExited) {
+                if (!$process.WaitForExit(10000)) { try { $process.Kill() } catch {}; try { $process.WaitForExit(2000) } catch {} }
+              }
+              try { $process.Dispose() } catch {}
+            }
+            if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Unit and contract tests
+        run: npm run test:unit
+      - name: Production build
+        run: npm run build
+      - name: Package Windows installer
+        run: npx electron-builder --win nsis --publish never

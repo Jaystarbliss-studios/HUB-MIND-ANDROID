@@ -1,0 +1,22 @@
+node_modules/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Native Windows helper build output
+native/**/bin/
+native/**/obj/
+native/**/publish/
+release/
+
+# Generated from the official logo during Windows packaging
+build-resources/icon.ico
+
+# Local backup snapshots
+jess_ai_backup/
+dist/
+build/
+out/
+

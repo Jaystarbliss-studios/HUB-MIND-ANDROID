@@ -1,0 +1,14 @@
+/api/config /.netlify/functions/config 200
+/api/admin/users/:uid /.netlify/functions/admin-users?uid=:uid 200
+/api/chat /.netlify/functions/chat 200
+/api/repository-context /.netlify/functions/repository-context 200
+/api/github/releases /.netlify/functions/repository-context 200
+/api/github/commits /.netlify/functions/repository-context 200
+/api/github/codebase /.netlify/functions/repository-context 200
+/api/web-search /.netlify/functions/repository-context 200
+/api/live-token /.netlify/functions/live-token 200
+/api/google-oauth-start /.netlify/functions/google-oauth-start 200
+/api/google-oauth-callback /.netlify/functions/google-oauth-callback 200
+/api/google-oauth-exchange /.netlify/functions/google-oauth-exchange 200
+/api/google-token /.netlify/functions/google-token 200
+/* /index.html 200

@@ -1,0 +1,84 @@
+name: Jess Native Tool Regression
+
+on:
+  pull_request:
+    paths:
+      - 'server.ts'
+      - 'src/lib/jessTools.ts'
+      - 'src/services/liveAudioClient.ts'
+      - 'src/components/JessFloatingAssistant.tsx'
+      - 'src/App.tsx'
+      - 'src/pages/JessSettings.tsx'
+      - 'src/pages/JessTranscriptOverlayPage.tsx'
+      - 'src/pages/jess-transcript-overlay.css'
+      - 'src/pages/CompanionPage.tsx'
+      - 'src/pages/PublicHome.tsx'
+      - 'src/pages/public-home.css'
+      - 'src/shared/jessNativeToolNames.ts'
+      - 'src/components/Layout.tsx'
+      - 'scripts/verify-jess.mjs'
+      - 'vite.config.ts'
+      - 'electron-builder.yml'
+      - 'src/App.tsx'
+      - 'src/pages/JessTranscriptOverlayPage.tsx'
+      - 'src/pages/jess-transcript-overlay.css'
+      - 'src/shared/jessNativeToolNames.ts'
+      - 'src/components/Layout.tsx'
+      - 'electron/**'
+      - 'tests/jess/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/jess-native-regression.yml'
+  push:
+    branches:
+      - feat/jess-core-runtime-overlay-integration
+    paths:
+      - 'server.ts'
+      - 'src/lib/jessTools.ts'
+      - 'src/services/liveAudioClient.ts'
+      - 'src/components/JessFloatingAssistant.tsx'
+      - 'src/App.tsx'
+      - 'src/pages/JessSettings.tsx'
+      - 'src/pages/JessTranscriptOverlayPage.tsx'
+      - 'src/pages/jess-transcript-overlay.css'
+      - 'src/pages/CompanionPage.tsx'
+      - 'src/pages/PublicHome.tsx'
+      - 'src/pages/public-home.css'
+      - 'src/shared/jessNativeToolNames.ts'
+      - 'src/components/Layout.tsx'
+      - 'scripts/verify-jess.mjs'
+      - 'vite.config.ts'
+      - 'electron-builder.yml'
+      - 'electron/**'
+      - 'tests/jess/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/jess-native-regression.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jess-native-regression-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck and Jess regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The current lockfile is missing four declared devDependencies; npm ci would fail before tests.
+      # Use npm install until the repository lockfile is regenerated and committed.
+      - run: npm install --no-audit --no-fund
+      - run: npm run verify:jess
+      - run: npm run typecheck
+      - run: node --check electron/main.cjs
+      - run: node --check electron/preload.cjs
+      - run: node --import tsx --test tests/jess/native-tool-registry-contract.test.mjs
+      - run: npm run test:unit

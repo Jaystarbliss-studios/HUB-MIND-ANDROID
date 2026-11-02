@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Hub-Mind</string>
+    <string name="accessibility_service_description">Hub-Mind Agent enables Jess to inspect active UI elements and perform owner-authorized taps, swipes, and text entries on this phone.</string>
+</resources>

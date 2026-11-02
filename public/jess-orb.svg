@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Jess AI orb">
+  <defs>
+    <radialGradient id="orb" cx="31%" cy="23%" r="82%">
+      <stop offset="0" stop-color="#2b6567"/>
+      <stop offset=".46" stop-color="#12333d"/>
+      <stop offset="1" stop-color="#070d18"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c1fff3"/>
+      <stop offset=".5" stop-color="#29d9c3"/>
+      <stop offset="1" stop-color="#507aee"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="57" fill="#2de0c8" opacity=".08"/>
+  <circle cx="64" cy="64" r="49" fill="url(#orb)" stroke="url(#rim)" stroke-width="2.4" filter="url(#glow)"/>
+  <circle cx="64" cy="64" r="42" fill="none" stroke="#b4fff2" stroke-opacity=".17"/>
+  <path d="M64 35c-7-9-22-3-20 8-9 4-11 16-4 22-5 10 2 20 12 20 4 0 8-2 12-6 4 4 8 6 12 6 10 0 17-10 12-20 7-6 5-18-4-22 2-11-13-17-20-8Z" fill="none" stroke="#a4fff0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 35v44M44 45c7 0 12 5 12 12s-5 12-12 12M84 45c-7 0-12 5-12 12s5 12 12 12M50 82c2-7 7-11 14-11s12 4 14 11" fill="none" stroke="#39e6d0" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="3.5" fill="#e7fff8"/>
+</svg>

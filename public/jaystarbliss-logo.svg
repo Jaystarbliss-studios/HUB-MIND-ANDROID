@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <circle cx="100" cy="100" r="98" fill="#18181b" />
+  
+  <!-- HOPE on top -->
+  <text x="100" y="44" fill="#ffffff" font-family="'Times New Roman', Georgia, serif" font-size="13" font-weight="bold" letter-spacing="6" text-anchor="middle">HOPE</text>
+  
+  <!-- TENACITY on left (vertical) -->
+  <g fill="#ffffff" font-family="'Times New Roman', Georgia, serif" font-size="10" font-weight="bold" text-anchor="middle">
+    <text x="54" y="60">T</text>
+    <text x="54" y="73">E</text>
+    <text x="54" y="86">N</text>
+    <text x="54" y="99">A</text>
+    <text x="54" y="112">C</text>
+    <text x="54" y="125">I</text>
+    <text x="54" y="138">T</text>
+    <text x="54" y="151">Y</text>
+  </g>
+
+  <!-- STRENGTH on right (vertical) -->
+  <g fill="#ffffff" font-family="'Times New Roman', Georgia, serif" font-size="10" font-weight="bold" text-anchor="middle">
+    <text x="146" y="60">S</text>
+    <text x="146" y="73">T</text>
+    <text x="146" y="86">R</text>
+    <text x="146" y="99">E</text>
+    <text x="146" y="112">N</text>
+    <text x="146" y="125">G</text>
+    <text x="146" y="138">T</text>
+    <text x="146" y="151">H</text>
+  </g>
+
+  <!-- Central Arch / Monogram Pillars -->
+  <!-- Top Cornice -->
+  <path d="M 68 47 L 132 47 L 132 51 L 68 51 Z" fill="#ffffff" />
+  <!-- Pillar & Arch Frame with Bottom Serifs -->
+  <path d="M 68 51 
+           L 132 51 
+           L 132 148 
+           C 132 154 135 158 142 158 
+           C 148 158 152 154 154 148 
+           C 156 156 152 163 144 163 
+           C 134 163 128 156 128 148 
+           L 128 62 
+           L 118 62 
+           L 118 144 
+           L 82 144 
+           L 82 62 
+           L 72 62 
+           L 72 148 
+           C 72 156 66 163 56 163 
+           C 48 163 44 156 46 148 
+           C 48 154 52 158 58 158 
+           C 65 158 68 154 68 148 
+           Z" fill="#ffffff" />
+
+  <!-- Inner Portal Opening border lines -->
+  <rect x="83" y="61" width="34" height="83" fill="none" stroke="#18181b" stroke-width="2" />
+</svg>

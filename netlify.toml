@@ -1,0 +1,104 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Browser-facing Firebase configuration is loaded at runtime through
+  # /api/config. scripts/build.mjs independently fails if a private credential
+  # or configured client value is embedded into the production bundle.
+  #
+  # Disable Netlify's deployment secret scan because this project intentionally
+  # has a runtime configuration boundary and the scanner previously flagged its
+  # own omit-key configuration. Sensitive credentials remain server-only.
+  SECRETS_SCAN_ENABLED = "false"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/config"
+  to = "/.netlify/functions/config"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/users/:uid"
+  to = "/.netlify/functions/admin-users?uid=:uid"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
+  from = "/api/repository-context"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/releases"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/commits"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/codebase"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/web-search"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/live-token"
+  to = "/.netlify/functions/live-token"
+  status = 200
+
+[[redirects]]
+  from = "/api/google-oauth-start"
+  to = "/.netlify/functions/google-oauth-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/google-oauth-callback"
+  to = "/.netlify/functions/google-oauth-callback"
+  status = 200
+
+[[redirects]]
+  from = "/api/google-oauth-exchange"
+  to = "/.netlify/functions/google-oauth-exchange"
+  status = 200
+
+[[redirects]]
+  from = "/api/google-token"
+  to = "/.netlify/functions/google-token"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+# Production deployment trigger: keep main as the authoritative Netlify production branch.

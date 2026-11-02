@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Hub-Mind Jess Browser Bridge",
+  "version": "1.0.0",
+  "description": "Lets the installed Hub-Mind desktop app control the user's real Chrome tabs through an authenticated native-messaging bridge.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqwv8HjpRNg8iL0WlH5rFz+NGr3/RrMMkZ259zMVS6XvOMXxmrBnmMvmoPMnLhnPBN2OBc9y3CU8P+v4F8wBFMWwjGwo9zP3wkDvKscXjHUrVsmtmV8SO9nSyHK2UhONDjMsKB5n8LYZyj0cAoIU0i1Uq2r97HQHidZDl5FdQ+A6GReMvQfXbvfJtRulsH1OkkbC/dpKv4ZzCU5A1reFuauHojevwd769AWlXk2iv8ebqSmnlwvByzRUFPQhkGATj8IAhjKuhFvgbcuGZGqBX6fj/V+qFwWDHJMrC3HsC3JPLhhlKr2FLrSx1V5zGkjNqIzNOpiUWm6jPILDr0lXbxQIDAQAB",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "nativeMessaging",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  }
+}

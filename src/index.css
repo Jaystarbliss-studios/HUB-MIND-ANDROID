@@ -1,0 +1,705 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617; /* Hub-Mind's established dark workspace background */
+  
+  --color-accent: #14b8a6; /* Teal 500 */
+  --color-accent-hover: #2dd4bf; /* Teal 400 */
+}
+
+body {
+  @apply bg-slate-950 text-slate-200 font-sans antialiased;
+}
+
+/* Keep the product workspace dark regardless of OS/browser color preference. */
+:root { color-scheme: dark; }
+html, body, #root {
+  min-height: 100%;
+  background-color: #020617 !important;
+  color: #e2e8f0;
+}
+body { background: #020617; color: #e2e8f0; }
+#root { isolation: isolate; }
+
+/* The workspace always keeps its original dark palette. Transparency belongs only to the companion document and is scoped in companion.css. */
+html, body, #root {
+  color-scheme: dark !important;
+  background-color: #020617 !important;
+  color: #e2e8f0;
+}
+html:not(:has(.jess-orb-window)), body:not(:has(.jess-orb-window)), #root:not(:has(.jess-orb-window)) { background-color: #020617 !important; color-scheme: dark !important; }
+#root > .flex.h-screen.bg-slate-950 { background-color: #020617 !important; }
+
+#root > .flex.h-screen.bg-slate-950 {
+  background-color: #020617 !important;
+  color: #f1f5f9;
+}
+body {
+  @apply bg-slate-950 text-slate-200 font-sans antialiased;
+}
+
+
+  .hide-scrollbar,
+  .no-scrollbar {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
+
+  @keyframes jess-orbit {
+    0% {
+      transform: rotate(45deg) translateX(48px) rotate(-45deg);
+    }
+    50% {
+      transform: rotate(225deg) translateX(48px) rotate(-225deg);
+    }
+    100% {
+      transform: rotate(405deg) translateX(48px) rotate(-405deg);
+    }
+  }
+
+  .animate-jess-orbit {
+    animation: jess-orbit 20s linear infinite;
+  }
+  .animate-jess-orbit:hover {
+    animation-play-state: paused;
+  }
+
+/* TipTap Editor Styles with Exact Office WYSIWYG Typography */
+.ProseMirror {
+  @apply outline-none w-full leading-relaxed;
+  font-size: 11pt;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  orphans: 3;
+  widows: 3;
+  /* The page surface owns its margins. Keeping ProseMirror margin-free prevents
+     margin-collapsing from shifting the first/last lines outside the printable area. */
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  width: 100%;
+  text-align: left;
+}
+
+.ProseMirror > * {
+  break-inside: auto;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  break-after: avoid;
+}
+
+.ProseMirror table,
+.ProseMirror img,
+.ProseMirror blockquote {
+  break-inside: avoid;
+}
+
+.document-paginated-editor-content {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  /* Never introduce a second page offset inside the already padded paper host. */
+  text-align: initial;
+}
+
+.document-paginated-editor-content .ProseMirror {
+  /* TipTap's editor must fill exactly the printable content width. */
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+/* Paginated editor physical-page safeguards */
+.document-paginated-editor-content .ProseMirror > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.document-paginated-editor-content .ProseMirror p,
+.document-paginated-editor-content .ProseMirror h1,
+.document-paginated-editor-content .ProseMirror h2,
+.document-paginated-editor-content .ProseMirror h3,
+.document-paginated-editor-content .ProseMirror h4,
+.document-paginated-editor-content .ProseMirror h5,
+.document-paginated-editor-content .ProseMirror h6 {
+  /* Preserve Tiptap's explicit text-align attribute (left/center/right/justify). */
+  text-align: inherit;
+}
+
+.document-paginated-editor-content .ProseMirror [style*="text-align"] {
+  text-align: revert;
+}
+
+.document-paginated-editor-content .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Explicit high-contrast rules for Paper White */
+.paper-white,
+.paper-white .ProseMirror,
+.paper-white .ProseMirror * {
+  color: #0f172a;
+}
+.paper-white .ProseMirror p,
+.paper-white .ProseMirror span,
+.paper-white .ProseMirror div,
+.paper-white .ProseMirror li {
+  color: #0f172a;
+}
+.paper-white .ProseMirror h1 {
+  color: #000000;
+}
+.paper-white .ProseMirror h2 {
+  color: #0f172a;
+}
+.paper-white .ProseMirror h3 {
+  color: #1e293b;
+}
+.paper-white .ProseMirror h4 {
+  color: #334155;
+}
+.paper-white .ProseMirror strong,
+.paper-white .ProseMirror b {
+  color: #000000;
+}
+
+/* Explicit high-contrast rules for Paper Dark */
+.paper-dark,
+.paper-dark .ProseMirror,
+.paper-dark .ProseMirror * {
+  color: #f1f5f9;
+}
+.paper-dark .ProseMirror p,
+.paper-dark .ProseMirror span,
+.paper-dark .ProseMirror div,
+.paper-dark .ProseMirror li {
+  color: #f1f5f9;
+}
+.paper-dark .ProseMirror h1 {
+  color: #ffffff;
+}
+.paper-dark .ProseMirror h2 {
+  color: #f8fafc;
+}
+.paper-dark .ProseMirror h3 {
+  color: #e2e8f0;
+}
+.paper-dark .ProseMirror h4 {
+  color: #cbd5e1;
+}
+.paper-dark .ProseMirror strong,
+.paper-dark .ProseMirror b {
+  color: #ffffff;
+}
+
+.ProseMirror h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.25;
+  margin-top: 1.25rem;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.015em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.ProseMirror h3 {
+  font-size: 1.22rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+.ProseMirror h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.ProseMirror p {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+
+.ProseMirror strong,
+.ProseMirror b {
+  font-weight: 700;
+}
+
+.ProseMirror em,
+.ProseMirror i {
+  font-style: italic;
+}
+
+.ProseMirror u {
+  text-decoration: underline;
+}
+
+.ProseMirror s,
+.ProseMirror del {
+  text-decoration: line-through;
+}
+
+.ProseMirror mark {
+  background-color: #fef08a;
+  color: #000000;
+  padding: 0.1em 0.25em;
+  border-radius: 0.2em;
+}
+
+.ProseMirror sub {
+  vertical-align: sub;
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.ProseMirror sup {
+  vertical-align: super;
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  @apply text-slate-400 float-left h-0 pointer-events-none;
+}
+.ProseMirror ul {
+  @apply list-disc list-inside;
+  margin-bottom: 0.75rem;
+}
+.ProseMirror ol {
+  @apply list-decimal list-inside;
+  margin-bottom: 0.75rem;
+}
+.ProseMirror li {
+  margin-bottom: 0.25rem;
+}
+.ProseMirror blockquote {
+  @apply border-l-4 pl-4 italic;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.paper-white .ProseMirror blockquote {
+  @apply border-slate-300 text-slate-700 bg-slate-50/50 py-1 rounded-r;
+}
+.paper-dark .ProseMirror blockquote {
+  @apply border-slate-700 text-slate-300 bg-slate-800/40 py-1 rounded-r;
+}
+.ProseMirror a {
+  @apply text-sky-600 dark:text-cyan-400 underline cursor-pointer font-medium;
+}
+.ProseMirror img {
+  @apply max-w-full h-auto rounded-lg;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+/* ProseMirror Page Break and Divider Elements — Preventing text overlap */
+.ProseMirror hr,
+.ProseMirror .page-break,
+.ProseMirror [data-page-break] {
+  @apply clear-both relative block w-full;
+  margin-top: 2.25rem;
+  margin-bottom: 2.25rem;
+  border: none;
+  border-top: 1.5px dashed #94a3b8;
+  height: 0;
+  overflow: visible;
+  user-select: none;
+}
+
+.paper-white .ProseMirror hr,
+.paper-white .ProseMirror .page-break,
+.paper-white .ProseMirror [data-page-break] {
+  border-top-color: #cbd5e1;
+}
+
+.paper-dark .ProseMirror hr,
+.paper-dark .ProseMirror .page-break,
+.paper-dark .ProseMirror [data-page-break] {
+  border-top-color: #334155;
+}
+
+/* Explicit badge for Page Breaks in Editor */
+.ProseMirror hr.page-break::after,
+.ProseMirror .page-break::after,
+.ProseMirror [data-page-break]::after {
+  content: 'PAGE BREAK';
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  transform: translateX(-50%);
+  background-color: #f8fafc;
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.08em;
+  padding: 1.5px 8px;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.paper-dark .ProseMirror hr.page-break::after,
+.paper-dark .ProseMirror .page-break::after,
+.paper-dark .ProseMirror [data-page-break]::after {
+  background-color: #0f172a;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+/* Soft Page Break styling (Automatic A4 boundary) */
+.ProseMirror hr.soft-page-break,
+.ProseMirror .soft-page-break,
+.ProseMirror [data-page-break="soft"] {
+  border-top-style: dotted;
+  border-top-color: #06b6d4 !important;
+}
+
+.ProseMirror hr.soft-page-break::after,
+.ProseMirror .soft-page-break::after,
+.ProseMirror [data-page-break="soft"]::after {
+  content: 'AUTOMATIC PAGE BREAK (A4)';
+  background-color: #ecfeff !important;
+  color: #0891b2 !important;
+  border-color: #a5f3fc !important;
+}
+
+.paper-dark .ProseMirror hr.soft-page-break::after,
+.paper-dark .ProseMirror .soft-page-break::after,
+.paper-dark .ProseMirror [data-page-break="soft"]::after {
+  background-color: #082f49 !important;
+  color: #38bdf8 !important;
+  border-color: #0e7490 !important;
+}
+.ProseMirror table {
+  @apply border-collapse table-auto w-full my-4;
+}
+.ProseMirror table td,
+.ProseMirror table th {
+  @apply relative p-2.5 min-w-[80px] align-top transition-colors;
+}
+.ProseMirror table td p,
+.ProseMirror table th p {
+  margin-top: 0;
+  margin-bottom: 0.2rem;
+}
+.ProseMirror table td p:last-child,
+.ProseMirror table th p:last-child {
+  margin-bottom: 0;
+}
+.paper-white .ProseMirror table td,
+.paper-white .ProseMirror table th {
+  @apply border border-slate-300 text-slate-900;
+}
+.paper-white .ProseMirror table th:not([data-bg-color]) {
+  @apply bg-slate-100 font-bold text-slate-900;
+}
+.paper-white .ProseMirror table th[data-bg-color] {
+  @apply font-bold text-slate-900;
+}
+.paper-dark .ProseMirror table td,
+.paper-dark .ProseMirror table th {
+  @apply border border-slate-700 text-slate-200;
+}
+.paper-dark .ProseMirror table th:not([data-bg-color]) {
+  @apply bg-slate-800 font-bold text-slate-200;
+}
+.paper-dark .ProseMirror table th[data-bg-color] {
+  @apply font-bold text-slate-900;
+}
+.paper-dark .ProseMirror table td[data-bg-color] {
+  @apply text-slate-900;
+}
+/* Border mode overrides for table cells */
+.ProseMirror table td[data-border-mode="none"],
+.ProseMirror table th[data-border-mode="none"] {
+  border-color: transparent !important;
+}
+.ProseMirror:focus-within table td[data-border-mode="none"],
+.ProseMirror:focus-within table th[data-border-mode="none"] {
+  border: 1px dashed rgba(148, 163, 184, 0.35) !important;
+}
+.ProseMirror table td[data-border-mode="bottom"],
+.ProseMirror table th[data-border-mode="bottom"] {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom-width: 2px !important;
+  border-bottom-style: solid !important;
+}
+.ProseMirror table td[data-border-mode="thick"],
+.ProseMirror table th[data-border-mode="thick"] {
+  border-width: 2.5px !important;
+  border-style: solid !important;
+}
+.ProseMirror table td[data-border-mode="dashed"],
+.ProseMirror table th[data-border-mode="dashed"] {
+  border-width: 1.5px !important;
+  border-style: dashed !important;
+}
+.ProseMirror table .selectedCell:after {
+  @apply z-10 absolute inset-0 bg-teal-500/20 ring-1 ring-inset ring-teal-400/60 content-[""] pointer-events-none;
+}
+.ProseMirror table th {
+  padding-right: 1.75rem !important;
+  cursor: pointer;
+}
+.ProseMirror table th:hover::before {
+  content: '⇅';
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: #0d9488;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.ProseMirror table th[data-sort-dir="asc"]::before {
+  content: '↑ ASC';
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0f766e;
+  background-color: rgba(20, 184, 166, 0.18);
+  border: 1px solid rgba(20, 184, 166, 0.45);
+  border-radius: 4px;
+  padding: 0px 4px;
+  line-height: 1.3;
+  opacity: 1;
+  pointer-events: none;
+}
+.ProseMirror table th[data-sort-dir="desc"]::before {
+  content: '↓ DESC';
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0369a1;
+  background-color: rgba(14, 165, 233, 0.18);
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  border-radius: 4px;
+  padding: 0px 4px;
+  line-height: 1.3;
+  opacity: 1;
+  pointer-events: none;
+}
+@media print {
+  .ProseMirror table th::before {
+    display: none !important;
+  }
+}
+.ProseMirror table .column-resize-handle {
+  @apply z-20 absolute right-[-2px] top-0 bottom-0 w-[4px] bg-teal-400/80 pointer-events-none;
+}
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+ul[data-type="taskList"] {
+  @apply list-none p-0;
+}
+ul[data-type="taskList"] li {
+  @apply flex items-start gap-2;
+}
+ul[data-type="taskList"] li > label {
+  @apply flex-shrink-0 mt-1;
+}
+ul[data-type="taskList"] li > div {
+  @apply flex-1;
+}
+
+/* Print Stylesheet for Letterheads and Clean Documents */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app shell chrome during print */
+  aside,
+  header,
+  nav,
+  #global-loading-progress-bar,
+  .print-hide,
+  .print\:hidden,
+  button,
+  .pwa-prompt,
+  [role="dialog"],
+  [class*="jess"],
+  .fixed.bottom-6.right-6 {
+    display: none !important;
+  }
+
+  .official-letterhead {
+    display: block !important;
+    border-bottom: 2px solid #0f172a !important;
+    margin-bottom: 24px !important;
+    padding-bottom: 16px !important;
+  }
+
+  .official-letterhead h1,
+  .official-letterhead p {
+    color: #000000 !important;
+  }
+
+  .ProseMirror {
+    min-height: auto !important;
+    padding: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    color: #000000 !important;
+    background: transparent !important;
+    font-size: 11pt !important;
+    line-height: 1.6 !important;
+  }
+
+  /* Ensure page breaks trigger physical sheet breaks in print output */
+  .ProseMirror hr,
+  .ProseMirror .page-break,
+  .ProseMirror [data-page-break],
+  .ProseMirror hr.page-break,
+  .ProseMirror hr.soft-page-break,
+  .ProseMirror .soft-page-break,
+  .ProseMirror .hard-page-break {
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-before: auto !important;
+    break-before: auto !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    visibility: hidden !important;
+    display: block !important;
+  }
+
+  .ProseMirror hr::after,
+  .ProseMirror .page-break::after,
+  .ProseMirror [data-page-break]::after {
+    display: none !important;
+  }
+
+  .ProseMirror h1 {
+    font-size: 18pt !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+  }
+
+  .ProseMirror h2 {
+    font-size: 14pt !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+  }
+
+  .ProseMirror h3 {
+    font-size: 12pt !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+  }
+}
+
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+body {
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea, select, [contenteditable] {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+
+/* Product-level invariant: the Hub-Mind workspace is always dark. Paper-white document canvases remain explicitly scoped to the editor. */
+html:root { color-scheme: dark !important; background: #020617 !important; }
+body:not(:has(.hm-public)):not(:has(.jess-orb-window)), body:not(:has(.hm-public)):not(:has(.jess-orb-window)) #root {
+  background-color: #020617 !important;
+  color: #e2e8f0;
+}
+
+/* Workspace theme lock: the public landing page styles must not change the authenticated workspace palette. */
+html, body, #root { color-scheme: dark; }
+body { background-color: #020617 !important; color: #e2e8f0; }
+#root { background-color: #020617; }
+.hm-public { color-scheme: dark; }
+
+/* Do not allow OS theme or landing-page CSS to flip authenticated workspace surfaces to light mode. */
+:root { color-scheme: dark !important; }
+body, #root { background-color: #020617; color: #e2e8f0; }
+
+/* Dark-first workspace contract: browser/OS appearance must not whiten the private workspace. */
+html:root { color-scheme: dark !important; background: #020617 !important; }
+body:not(:has(.hm-public)):not(:has(.jess-orb-window)), body:not(:has(.hm-public)):not(:has(.jess-orb-window)) #root { background-color: #020617 !important; color: #e2e8f0 !important; }
+body:not(:has(.hm-public)) #root > .min-h-screen, body:not(:has(.hm-public)) #root > .h-screen { background-color: #020617; }
+
+
+/* Hub-Mind desktop workspace is permanently dark, independent of Windows theme settings. */
+:root { color-scheme: dark !important; }
+html:not(:has(.jess-orb-window)), body:not(:has(.jess-orb-window)), #root:not(:has(.jess-orb-window)) { background-color:#020617 !important; color-scheme:dark !important; }

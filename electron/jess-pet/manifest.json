@@ -1,0 +1,65 @@
+{
+  "name": "Jess",
+  "source": "User-provided chibi sprite sheet",
+  "offline": true,
+  "atlas": {
+    "columns": 5,
+    "rows": 6,
+    "format": "six transparent WebP row strips; square frame size is detected per strip"
+  },
+  "animations": {
+    "idle": [
+      4
+    ],
+    "stride": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "run": [
+      5,
+      6
+    ],
+    "jump": [
+      7,
+      8
+    ],
+    "think": [
+      9
+    ],
+    "expressions": [
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "walk": [
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "tired": [
+      20,
+      21,
+      22,
+      23,
+      24
+    ],
+    "celebrate": [
+      25,
+      26,
+      27,
+      28,
+      29
+    ]
+  },
+  "notes": [
+    "2D sprite animation from the supplied sheet; not a rigged 3D model.",
+    "Essential visual assets are local; the pet page makes no network requests."
+  ]
+}

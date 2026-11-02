@@ -1,0 +1,156 @@
+name: Hub-Mind Windows Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'electron/**'
+      - 'native/**'
+      - 'chrome-extension/**'
+      - 'scripts/install-jess-chrome-bridge.ps1'
+      - 'scripts/uninstall-jess-chrome-bridge.ps1'
+      - 'electron-builder.yml'
+      - 'package.json'
+      - 'src/**'
+      - 'tests/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - '.github/workflows/windows-release.yml'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'electron/**'
+      - 'native/**'
+      - 'chrome-extension/**'
+      - 'scripts/install-jess-chrome-bridge.ps1'
+      - 'scripts/uninstall-jess-chrome-bridge.ps1'
+      - 'electron-builder.yml'
+      - 'package.json'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - '.github/workflows/windows-release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Ensure Rollup Windows native binary is installed
+        run: npm install --no-save --include=optional @rollup/rollup-win32-x64-msvc@4.62.4 lightningcss-win32-x64-msvc@1.32.0 @tailwindcss/oxide-win32-x64-msvc@4.3.3
+      - name: Publish self-contained .NET Chrome native host
+        run: dotnet publish native/JessChromeNativeHost/JessChromeNativeHost.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessChromeNativeHost/publish
+      - name: Publish self-contained .NET offline wake helper
+        run: dotnet publish native/JessOfflineWake/JessOfflineWake.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessOfflineWake/publish
+      - name: Publish self-contained .NET Windows OCR helper
+        run: dotnet publish native/JessWindowsOcr/JessWindowsOcr.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o native/JessWindowsOcr/publish
+      - name: Verify assistant integration
+        run: npm run verify:jess
+      - name: Validate PowerShell agent syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'electron/jess-agent.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+      - name: TypeScript validation
+        run: npm run typecheck
+      - name: Unit and contract tests
+        run: npm run test:unit
+      - name: Build web workspace
+        run: npm run build
+      - name: Prepare optional Windows code-signing certificate
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            Write-Output 'No signing certificate configured; the installer will remain unsigned.'
+            exit 0
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'hubmind-windows-signing.pfx'
+          $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+          "CSC_LINK=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CSC_KEY_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate valid 256px Windows icon from official logo
+        shell: pwsh
+        run: ./scripts/generate-windows-icon.ps1
+      - name: Package Windows installer
+        run: npx electron-builder --win nsis --publish never
+      - name: Archive installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-mind-windows-installer
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Archive Jess Chrome extension for manual installation
+        shell: pwsh
+        run: Compress-Archive -Path chrome-extension\* -DestinationPath release\Jess-Chrome-Extension.zip -Force
+      - name: Upload Chrome extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jess-chrome-extension
+          path: release/Jess-Chrome-Extension.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    needs: windows-installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-mind-windows-installer
+          path: release
+      - name: Download Jess Chrome extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jess-chrome-extension
+          path: release
+      - name: Publish installer and extension to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('desktop-v{0}', github.run_number) }}
+          name: Hub-Mind Windows Installer ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('desktop-v{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            release/*.exe
+            release/Jess-Chrome-Extension.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

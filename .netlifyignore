@@ -1,0 +1,8 @@
+jess_ai_backup/
+dist/
+build/
+out/
+native/
+electron/
+.git/
+node_modules/

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none';">
+  <title>Jess · Hub-Mind Companion</title>
+  <link rel="stylesheet" href="./pet.css">
+  <script src="./assets/js/three.min.js" defer></script>
+  <script src="./pet.js" defer></script>
+</head>
+<body>
+  <main class="pet-shell" aria-label="Jess desktop companion">
+    <div class="speech" id="speech" role="status" aria-live="polite" hidden>
+      <span id="speech-text">I'm here.</span>
+    </div>
+    <button class="character-hitbox" id="character" type="button" aria-label="Jess. Click to connect or mute; double-click to connect or end the voice session. Drag to move. Right-click to hide.">
+      <canvas id="jess-visualizer" width="130" height="130" aria-hidden="true"></canvas>
+      <canvas id="jess-canvas" width="520" height="600" aria-label="Procedurally modelled 3D Jess character"></canvas>
+    </button>
+    <div class="connection-status" id="status" data-status="disconnected" role="status" aria-live="polite">
+      <span class="connection-dot" aria-hidden="true"></span>
+      <span id="status-label">Double-click Jess to talk</span>
+    </div>
+  </main>
+</body>
+</html>

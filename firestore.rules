@@ -1,0 +1,125 @@
+rules_version='2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){ return request.auth != null; }
+    function isBootstrappedAdmin(){ return signedIn() && request.auth.token.email in ['johnrufai242@gmail.com', 'rufaijohnny@gmail.com']; }
+    function hasUser(){ return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function me(){ return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function member(){ return (hasUser() && me().status == 'active') || isBootstrappedAdmin(); }
+    function admin(){ return isBootstrappedAdmin() || (hasUser() && me().status == 'active' && me().role == 'admin'); }
+    function self(uid){ return signedIn() && request.auth.uid == uid; }
+    function sharedReadData(data){ return data.visibility == 'shared' && (
+      (('sharedWith' in data) && data.sharedWith is list && request.auth.uid in data.sharedWith) ||
+      (('sharedWith' in data) && data.sharedWith is map && request.auth.uid in data.sharedWith && data.sharedWith[request.auth.uid] in ['read','write']) ||
+      (('permissions' in data) && data.permissions is map && request.auth.uid in data.permissions && data.permissions[request.auth.uid] in ['read','write'])
+    ); }
+    function sharedWriteData(data){ return data.visibility == 'shared' && (
+      (('sharedWith' in data) && data.sharedWith is map && request.auth.uid in data.sharedWith && data.sharedWith[request.auth.uid] == 'write') ||
+      (('permissions' in data) && data.permissions is map && request.auth.uid in data.permissions && data.permissions[request.auth.uid] == 'write')
+    ); }
+    function sharedRead(){ return sharedReadData(resource.data); }
+    function sharedWrite(){ return sharedWriteData(resource.data); }
+    function readable(){ return member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.createdBy == request.auth.uid || resource.data.visibility == 'workspace' || sharedRead()); }
+    function writable(){ return member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.createdBy == request.auth.uid || sharedWrite() || resource.data.visibility == 'workspace'); }
+    function newOwner(){ return member() && (admin() || request.resource.data.ownerId == request.auth.uid); }
+    function createdByMe(){ return member() && (admin() || request.resource.data.createdBy == request.auth.uid); }
+    function visibleList(){ return member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.createdBy == request.auth.uid || resource.data.visibility == 'workspace' || sharedRead()); }
+    function validAcceptedInvitation(invitationId){ return signedIn() && exists(/databases/$(database)/documents/invitations/$(invitationId)) && get(/databases/$(database)/documents/invitations/$(invitationId)).data.status == 'accepted' && get(/databases/$(database)/documents/invitations/$(invitationId)).data.acceptedUid == request.auth.uid && get(/databases/$(database)/documents/invitations/$(invitationId)).data.email == request.auth.token.email; }
+
+    match /{document=**} { allow read, write: if false; }
+    match /users/{userId} {
+      allow get, list: if member() || admin() || self(userId);
+      allow create: if (isBootstrappedAdmin() && request.resource.data.id == request.auth.uid && request.resource.data.role == 'admin' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email) ||
+                       (validAcceptedInvitation(request.resource.data.invitationId) && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email) ||
+                       (request.resource.data.registrationSource == 'existing-auth' && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email);
+      allow update: if admin() || (self(userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferredName','photoUrl','name','phone','lastSeenAt','displayName']));
+      allow delete: if admin();
+      match /conversations/{id} { allow read, write: if self(userId) || admin(); }
+      match /memories/{id} { allow read, write: if signedIn() && (request.auth.uid == userId || admin() || isBootstrappedAdmin()); }
+      match /private/{document=**} { allow read, write: if self(userId) || admin(); }
+      match /dailyReports/{id} { allow read, write: if self(userId) || admin(); }
+      match /weeklyReports/{id} { allow read, write: if self(userId) || admin(); }
+      match /jessTasks/{id} { allow read, write: if self(userId) || admin(); }
+    }
+    match /invitations/{id} {
+      allow get: if admin() || (signedIn() && resource.data.email == request.auth.token.email);
+      allow list: if admin();
+      allow create: if admin() && request.resource.data.role == 'staff' && request.resource.data.status == 'invited' && request.resource.data.invitedBy == request.auth.uid;
+      allow update: if admin() || (signedIn() && resource.data.status == 'invited' && resource.data.email == request.auth.token.email && request.resource.data.status == 'accepted' && request.resource.data.acceptedUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedAt','acceptedUid']));
+      allow delete: if admin();
+    }
+    match /connections/{id} { allow get: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); allow list: if admin() || (member() && (resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid)); allow create: if admin() || (member() && request.resource.data.requesterId == request.auth.uid && request.resource.data.recipientId is string && request.resource.data.recipientId != request.auth.uid); allow update, delete: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); }
+    match /shares/{id} { allow get: if member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid); allow list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid)); allow create: if admin() || (member() && request.resource.data.ownerId == request.auth.uid); allow update, delete: if admin() || (member() && resource.data.ownerId == request.auth.uid); }
+    match /notifications/{id} {
+      allow get, list: if admin() || (member() && resource.data.userId == request.auth.uid);
+      allow create: if admin()
+        || (member() && request.resource.data.userId == request.auth.uid)
+        || (member()
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.messageId is string
+          && exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId))
+          && get(/databases/$(database)/documents/messages/$(request.resource.data.messageId)).data.senderId == request.auth.uid
+          && get(/databases/$(database)/documents/messages/$(request.resource.data.messageId)).data.recipientId == request.resource.data.userId);
+      allow update, delete: if admin() || (member() && resource.data.userId == request.auth.uid);
+    }
+    match /messages/{messageId} {
+      allow get, list: if member() && (admin() || resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      allow create: if member()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.recipientId is string
+        && request.resource.data.recipientId != request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 12000;
+      allow update: if member()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt','read','updatedAt']);
+      allow delete: if admin() || (member() && resource.data.senderId == request.auth.uid);
+    }
+    match /messageDrafts/{draftId} {
+      allow get, list: if member() && resource.data.userId == request.auth.uid;
+      allow create: if member() && request.resource.data.userId == request.auth.uid;
+      allow update: if member() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if admin() || (member() && resource.data.userId == request.auth.uid);
+    }
+    match /systemSettings/{settingId} {
+      allow get, list: if admin() || (member() && settingId == 'jessPublic');
+      allow create, update, delete: if admin();
+    }
+    match /activityLogs/{id} { allow get, list: if admin() || member(); allow create: if member() && request.resource.data.userId == request.auth.uid; allow update, delete: if admin(); }
+    match /tasks/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList() || (member() && resource.data.assignedTo == request.auth.uid); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /documents/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /projects/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /clients/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /meetings/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /followUps/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /knowledge/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /reports/{id} { allow get: if member() && readable(); allow list: if admin() || visibleList(); allow create: if member() && (newOwner() || createdByMe()); allow update, delete: if member() && writable(); }
+    match /inbox/{id} { allow get: if member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.userId == request.auth.uid || resource.data.createdBy == request.auth.uid || resource.data.visibility == 'workspace'); allow list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.userId == request.auth.uid || resource.data.createdBy == request.auth.uid || resource.data.visibility == 'workspace')); allow create: if member() && (request.resource.data.ownerId == request.auth.uid || request.resource.data.userId == request.auth.uid || request.resource.data.createdBy == request.auth.uid); allow update, delete: if member() && (admin() || resource.data.ownerId == request.auth.uid || resource.data.userId == request.auth.uid || resource.data.createdBy == request.auth.uid); }
+    match /payments/{id} { allow get, list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.userId == request.auth.uid)); allow create: if admin() || (member() && (request.resource.data.ownerId == request.auth.uid || request.resource.data.userId == request.auth.uid) && (!('status' in request.resource.data) || request.resource.data.status in ['pending','awaiting_confirmation','awaiting_payment','pending_confirmation'])); allow update, delete: if admin(); }
+    match /resourceShares/{id} { allow get, list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid)); allow create: if admin() || (member() && request.resource.data.ownerId == request.auth.uid); allow update, delete: if admin() || (member() && resource.data.ownerId == request.auth.uid); }
+    match /sharedRecords/{id} { allow get, list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid || resource.data.createdBy == request.auth.uid)); allow create: if admin() || (member() && (request.resource.data.ownerId == request.auth.uid || request.resource.data.createdBy == request.auth.uid)); allow update, delete: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.createdBy == request.auth.uid)); }
+    match /documents/{documentId}/versions/{versionId} {
+      allow get, list: if member() && (
+        admin() ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.ownerId == request.auth.uid ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy == request.auth.uid ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.visibility == 'workspace' ||
+        (
+          get(/databases/$(database)/documents/documents/$(documentId)).data.visibility == 'shared' &&
+          sharedReadData(get(/databases/$(database)/documents/documents/$(documentId)).data)
+        )
+      );
+      allow create: if member() && (
+        admin() ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.ownerId == request.auth.uid ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy == request.auth.uid ||
+        get(/databases/$(database)/documents/documents/$(documentId)).data.visibility == 'workspace'
+      );
+      allow update, delete: if admin() || get(/databases/$(database)/documents/documents/$(documentId)).data.ownerId == request.auth.uid;
+    }
+    match /recurringMeetingTemplates/{id} { allow get, list: if admin() || (member() && resource.data.ownerId == request.auth.uid); allow create: if newOwner(); allow update, delete: if admin() || (member() && resource.data.ownerId == request.auth.uid); }
+    match /recurringTaskTemplates/{id} { allow get, list: if admin() || (member() && resource.data.ownerId == request.auth.uid); allow create: if newOwner(); allow update, delete: if admin() || (member() && resource.data.ownerId == request.auth.uid); }
+    match /conversations/{id} { allow get, list: if admin() || (member() && resource.data.userId == request.auth.uid); allow create, update, delete: if admin() || (member() && request.resource.data.userId == request.auth.uid); }
+    match /memories/{id} { allow get, list: if admin() || (member() && resource.data.userId == request.auth.uid); allow create, update, delete: if admin() || (member() && request.resource.data.userId == request.auth.uid); }
+  }
+}

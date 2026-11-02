@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Suppress benign [vite] HMR connection notices and mock Vite WebSocket in container environment
+      (function() {
+        if (typeof window !== 'undefined' && window.WebSocket && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+          const OrigWebSocket = window.WebSocket;
+          const isViteWs = function(url, protocols) {
+            // Vite's development socket is local to the current dev server.
+            // Never mock external WebSockets (notably Gemini Live on Google hosts),
+            // even when their authentication URL contains an access_token query.
+            let candidate;
+            try { candidate = new URL(String(url || ''), window.location.href); } catch { return false; }
+            if (!['ws:', 'wss:'].includes(candidate.protocol) || candidate.hostname !== window.location.hostname) return false;
+            const pathname = candidate.pathname.toLowerCase();
+            const hasViteProtocol = typeof protocols === 'string'
+              ? /vite|hmr|ping/i.test(protocols)
+              : Array.isArray(protocols) && protocols.some(protocol => /vite|hmr|ping/i.test(String(protocol)));
+            return pathname === '/' || pathname.includes('vite') || pathname.includes('hmr') || pathname === '/__vite_ping' || hasViteProtocol;
+          };
+
+          function ViteMockWebSocket(url, protocols) {
+            if (!(this instanceof ViteMockWebSocket)) {
+              return new ViteMockWebSocket(url, protocols);
+            }
+            if (!isViteWs(url, protocols)) {
+              return new OrigWebSocket(url, protocols);
+            }
+            const self = this;
+            this.url = String(url || '');
+            this.protocol = typeof protocols === 'string' ? protocols : (Array.isArray(protocols) ? protocols[0] : 'vite-hmr');
+            this.readyState = OrigWebSocket.OPEN || 1;
+            this.binaryType = 'blob';
+            this.bufferedAmount = 0;
+            this.extensions = '';
+            this.onopen = null;
+            this.onclose = null;
+            this.onerror = null;
+            this.onmessage = null;
+            const listeners = {};
+
+            this.addEventListener = function(type, listener) {
+              if (!listeners[type]) listeners[type] = [];
+              listeners[type].push(listener);
+            };
+
+            this.removeEventListener = function(type, listener) {
+              if (!listeners[type]) return;
+              listeners[type] = listeners[type].filter(function(l) { return l !== listener; });
+            };
+
+            this.dispatchEvent = function(event) {
+              const type = event && event.type;
+              if (listeners[type]) {
+                listeners[type].forEach(function(fn) {
+                  try { fn.call(self, event); } catch (e) {}
+                });
+              }
+              if (type === 'open' && typeof self.onopen === 'function') {
+                try { self.onopen.call(self, event); } catch (e) {}
+              }
+              if (type === 'message' && typeof self.onmessage === 'function') {
+                try { self.onmessage.call(self, event); } catch (e) {}
+              }
+              if (type === 'close' && typeof self.onclose === 'function') {
+                try { self.onclose.call(self, event); } catch (e) {}
+              }
+              if (type === 'error' && typeof self.onerror === 'function') {
+                try { self.onerror.call(self, event); } catch (e) {}
+              }
+              return true;
+            };
+
+            this.send = function(data) {
+              try {
+                const parsed = typeof data === 'string' ? JSON.parse(data) : null;
+                if (parsed && parsed.type === 'ping') {
+                  setTimeout(function() {
+                    self.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'pong' }) }));
+                  }, 10);
+                }
+              } catch (e) {}
+            };
+
+            this.close = function() {
+              self.readyState = OrigWebSocket.CLOSED || 3;
+              self.dispatchEvent(new CloseEvent('close'));
+            };
+
+            setTimeout(function() {
+              self.readyState = OrigWebSocket.OPEN || 1;
+              self.dispatchEvent(new Event('open'));
+              setTimeout(function() {
+                self.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'connected' }) }));
+              }, 20);
+            }, 10);
+          }
+
+          ViteMockWebSocket.CONNECTING = OrigWebSocket.CONNECTING || 0;
+          ViteMockWebSocket.OPEN = OrigWebSocket.OPEN || 1;
+          ViteMockWebSocket.CLOSING = OrigWebSocket.CLOSING || 2;
+          ViteMockWebSocket.CLOSED = OrigWebSocket.CLOSED || 3;
+          ViteMockWebSocket.prototype = OrigWebSocket.prototype;
+
+          window.WebSocket = ViteMockWebSocket;
+        }
+
+        const isViteNotice = (args) => {
+          if (!args) return false;
+          const items = Array.isArray(args) ? args : [args];
+          return items.some(arg => {
+            if (!arg) return false;
+            let fullText = '';
+            try {
+              if (typeof arg === 'string') {
+                fullText = arg;
+              } else if (typeof arg === 'object') {
+                fullText = String(arg.message || arg.stack || arg.reason || arg.name || '') + ' ' + (typeof arg.toString === 'function' ? arg.toString() : '');
+              } else {
+                fullText = String(arg);
+              }
+            } catch (e) {
+              fullText = '';
+            }
+            const lower = fullText.toLowerCase();
+            return (
+              lower.includes('[vite]') ||
+              lower.includes('failed to connect to websocket') ||
+              lower.includes('vite:') ||
+              lower.includes('/@vite/') ||
+              lower.includes('@vite') ||
+              lower.includes('cannot connect to websocket') ||
+              lower.includes('server is unavailable') ||
+              lower.includes('hmr') ||
+              lower.includes('hot reload') ||
+              lower.includes('vite-ping') ||
+              lower.includes('vite-hmr') ||
+              lower.includes('ephemeral token support is experimental') ||
+              lower.includes('cross-origin-opener-policy policy would block')
+            );
+          });
+        };
+
+        const origWarn = console.warn;
+        const origError = console.error;
+        const origLog = console.log;
+        const origInfo = console.info;
+        const origDebug = console.debug;
+
+        console.warn = function(...args) {
+          if (isViteNotice(args)) return;
+          origWarn.apply(console, args);
+        };
+        console.error = function(...args) {
+          if (isViteNotice(args)) return;
+          origError.apply(console, args);
+        };
+        console.log = function(...args) {
+          if (isViteNotice(args)) return;
+          origLog.apply(console, args);
+        };
+        if (origInfo) {
+          console.info = function(...args) {
+            if (isViteNotice(args)) return;
+            origInfo.apply(console, args);
+          };
+        }
+        if (origDebug) {
+          console.debug = function(...args) {
+            if (isViteNotice(args)) return;
+            origDebug.apply(console, args);
+          };
+        }
+
+        window.onerror = function(msg, url, line, col, error) {
+          if (isViteNotice([msg, url, error])) {
+            return true;
+          }
+        };
+
+        window.addEventListener('error', function(event) {
+          if (!event) return;
+          if (isViteNotice([event.message, event.filename, event.error])) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (!event) return;
+          if (isViteNotice([event.reason])) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Hub-Mind</title>
+    <style>
+      vite-error-overlay {
+        display: none !important;
+      }
+    </style>
+    <link rel="icon" type="image/png" href="/hub-mind%20logo.png" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#020617" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hub-Mind" />
+    <link rel="apple-touch-icon" href="/hub-mind%20logo.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/hub-mind%20logo.png" />
+    
+    <!-- Primary Meta Tags -->
+    <meta name="title" content="Hub-Mind" />
+    <meta name="description" content="Hub-Mind — your private operations workspace and AI assistant Jess" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://hub-mind.netlify.app/" />
+    <meta property="og:title" content="Hub-Mind" />
+    <meta property="og:description" content="Hub-Mind — your private operations workspace and AI assistant Jess" />
+    <meta property="og:image" content="https://hub-mind.netlify.app/hub-mind%20logo.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://hub-mind.netlify.app/" />
+    <meta property="twitter:title" content="Hub-Mind" />
+    <meta property="twitter:description" content="Hub-Mind — your private operations workspace and AI assistant Jess" />
+    <meta property="twitter:image" content="https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=1200&auto=format&fit=crop" />
+  </head>
+  <body>
+    <div id="pwa-splash">
+      <style>
+        #pwa-splash {
+          position: fixed;
+          inset: 0;
+          background-color: #0f172a;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          z-index: 99999;
+          transition: opacity 0.3s ease-out;
+        }
+        .pwa-logo {
+          width: 80px;
+          height: 80px;
+          margin-bottom: 24px;
+          animation: pwa-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pwa-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: .7; transform: scale(0.95); }
+        }
+        .pwa-title {
+          color: white;
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: 24px;
+          font-weight: 700;
+          margin: 0 0 8px 0;
+        }
+        .pwa-subtitle {
+          color: #94a3b8;
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: 14px;
+        }
+      </style>
+      <img class="pwa-logo" src="/hub-mind%20logo.png" alt="Hub-Mind" />
+      <h1 class="pwa-title">Hub-Mind</h1>
+      <p class="pwa-subtitle">Loading Workspace...</p>
+      <script>
+        // Dismiss splash screen quickly
+        setTimeout(function() {
+          var el = document.getElementById('pwa-splash');
+          if (el) {
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+            setTimeout(function() { if (el && el.parentNode) el.parentNode.removeChild(el); }, 300);
+          }
+        }, 300);
+      </script>
+    </div>
+
+    <div id="root"></div>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

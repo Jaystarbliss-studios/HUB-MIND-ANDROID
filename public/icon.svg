@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hub-Mind">
+  <rect width="64" height="64" rx="16" fill="#0f172a"/>
+  <g fill="none" stroke="#14b8a6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 14a8 8 0 1 0-15.99.33 11 11 0 0 0-6.95 15.87 11 11 0 0 0 1.53 18.12A11 11 0 1 0 32 49Z"/>
+    <path d="M32 14a8 8 0 1 1 15.99.33 11 11 0 0 1 6.95 15.87 11 11 0 0 1-1.53 18.12A11 11 0 1 1 32 49Z"/>
+    <path d="M40 37a13 13 0 0 1-8-11 13 13 0 0 1-8 11"/>
+    <path d="M46 18a8 8 0 0 0 1.1-3.4M18 18a8 8 0 0 1-1.1-3.4M12 32a10 10 0 0 1 1.6-1.1M52 32a10 10 0 0 0-1.6-1.1"/>
+  </g>
+</svg>

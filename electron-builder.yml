@@ -1,0 +1,45 @@
+appId: studios.jaystarbliss.hubmind
+productName: Hub-Mind
+directories:
+  output: release
+  buildResources: build-resources
+asarUnpack:
+  - electron/jess-agent.ps1
+files:
+  - dist/**
+  - electron/**
+  - package.json
+  - '!node_modules/.cache/**'
+extraResources:
+  - from: chrome-extension
+    to: jess-chrome-extension
+  - from: native/JessChromeNativeHost/publish/JessChromeNativeHost.exe
+    to: JessChromeNativeHost.exe
+  - from: native/JessOfflineWake/publish/JessOfflineWake.exe
+    to: JessOfflineWake.exe
+  - from: native/JessWindowsOcr/publish/JessWindowsOcr.exe
+    to: JessWindowsOcr.exe
+  - from: scripts/install-jess-chrome-bridge.ps1
+    to: Install-JessChromeBridge.ps1
+  - from: scripts/uninstall-jess-chrome-bridge.ps1
+    to: Uninstall-JessChromeBridge.ps1
+win:
+  icon: build-resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Hub-Mind-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Hub-Mind
+  deleteAppDataOnUninstall: false
+  include: scripts/installer.nsh
+publish:
+  provider: github
+  owner: Jaystarbliss-studios
+  repo: HUB-MIND
