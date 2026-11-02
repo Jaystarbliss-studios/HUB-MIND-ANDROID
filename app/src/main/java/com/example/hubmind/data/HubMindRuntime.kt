@@ -76,8 +76,8 @@ object HubMindRuntime {
             require(runtimeConfig.projectId.isNotBlank() && runtimeConfig.projectId != "test-project") {
                 "The Hub-Mind server returned an invalid Firebase project ID."
             }
-            require(runtimeConfig.appId.isNotBlank() && !runtimeConfig.appId.endsWith(":hubmind")) {
-                "The Hub-Mind server returned a placeholder Firebase app ID."
+            require(runtimeConfig.appId.isNotBlank()) {
+                "The Hub-Mind server returned no Firebase app ID."
             }
 
             setConfig(runtimeConfig)
