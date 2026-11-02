@@ -135,6 +135,13 @@ fun SettingsScreen(
                             colors = SwitchDefaults.colors(checkedThumbColor = Teal400, checkedTrackColor = Teal900)
                         )
                     }
+                    Text(
+                        text = if (state.isAccessibilityConnected) "Accessibility service is currently connected."
+                            else if (state.isAccessibilityEnabled) "Permission is enabled; the service is not currently connected."
+                            else "Accessibility service is disabled.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (state.isAccessibilityConnected) Green400 else Amber400
+                    )
 
                     Divider(color = Slate800, thickness = 1.dp)
 
@@ -142,19 +149,19 @@ fun SettingsScreen(
                     PermissionRow(
                         icon = Icons.Filled.AccessibilityNew,
                         title = "Hub-Mind Accessibility Service",
-                        subtitle = "Allows Jess to dumper UI nodes & perform taps, swipes, and text entry",
-                        isGranted = state.isAccessibilityConnected
+                        subtitle = "Lets Jess inspect permitted UI elements and dispatch user-authorised gestures",
+                        isGranted = state.isAccessibilityEnabled
                     )
 
                     // Guided setup instructions if accessibility is disconnected
-                    if (!state.isAccessibilityConnected) {
+                    if (!state.isAccessibilityEnabled) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = Amber400.copy(alpha = 0.12f),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Amber400.copy(alpha = 0.3f))
                         ) {
                             Text(
-                                text = "To enable: Go to Android Settings > Accessibility > Installed / Downloaded Apps > Enable 'Hub-Mind Agent'.",
+                                text = "Enable Hub-Mind Agent in Android Settings > Accessibility > Installed or Downloaded apps. Android will show the system permission screen.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Amber400,
                                 modifier = Modifier.padding(10.dp),
