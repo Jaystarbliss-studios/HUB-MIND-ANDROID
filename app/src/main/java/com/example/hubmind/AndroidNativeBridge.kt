@@ -47,6 +47,7 @@ class AndroidNativeBridge(
         }
         return JSONObject()
             .put("deviceId", "android-phone-$deviceId")
+            .put("agentSessionActive", prefs.getBoolean("agent_session_active", false))
             .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
             .put("platform", "ANDROID")
             .put("batteryPercent", battery)
@@ -74,12 +75,14 @@ class AndroidNativeBridge(
     @JavascriptInterface
     fun startAgentSession(token: String) {
         if (!isValidToken(token)) return
+        activity.getSharedPreferences("hubmind_native", Context.MODE_PRIVATE).edit().putBoolean("agent_session_active", true).apply()
         activity.runOnUiThread { HubMindAgentForegroundService.startService(activity) }
     }
 
     @JavascriptInterface
     fun stopAgentSession(token: String) {
         if (!isValidToken(token)) return
+        activity.getSharedPreferences("hubmind_native", Context.MODE_PRIVATE).edit().putBoolean("agent_session_active", false).apply()
         activity.runOnUiThread { HubMindAgentForegroundService.stopService(activity) }
     }
 
@@ -122,6 +125,21 @@ class AndroidNativeBridge(
             }
             "STOP_AGENT_SESSION" -> {
                 activity.runOnUiThread { HubMindAgentForegroundService.stopService(activity) }
+                return JSONObject().put("success", true).put("verified", true)
+                    .put("message", "Stopped the Hub-Mind foreground device-control session.")
+            }
+            "OPEN_ACCESSIBILITY_SETTINGS" -> {
+                openAccessibilitySettings(bridgeToken)
+                return JSONObject().put("success", true).put("verified", false)
+                    .put("message", "Opened Android Accessibility Settings. Enable Hub-Mind Accessibility there, then return to Hub-Mind.")
+            }
+            "START_AGENT_SESSION" -> {
+                startAgentSession(bridgeToken)
+                return JSONObject().put("success", true).put("verified", false)
+                    .put("message", "Started the user-requested Hub-Mind foreground device-control session.")
+            }
+            "STOP_AGENT_SESSION" -> {
+                stopAgentSession(bridgeToken)
                 return JSONObject().put("success", true).put("verified", true)
                     .put("message", "Stopped the Hub-Mind foreground device-control session.")
             }
