@@ -144,7 +144,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = false,
+                        verified = ok,
                         outputText = if (ok) "Entered text into focused input field" else "No active focused editable field found",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -156,7 +156,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = false,
+                        verified = ok,
                         outputText = "Cleared text field",
                         durationMs = System.currentTimeMillis() - startTime
                     )
