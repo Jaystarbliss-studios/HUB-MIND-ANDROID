@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
 import com.example.hubmind.data.model.*
+import com.example.hubmind.data.HubMindRuntime
 import com.example.hubmind.agent.HubMindAccessibilityService
 import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.BuildConfig
@@ -34,8 +35,6 @@ import java.util.UUID
 
 class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
     companion object {
-        private const val FIRESTORE_DATABASE_ID =
-            "ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430"
         private val ADMIN_EMAILS = setOf(
             "johnrufai242@gmail.com",
             "rufaijohnny@gmail.com"
@@ -48,13 +47,17 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
     }
     private val firebaseAuth = firebaseApp?.let { FirebaseAuth.getInstance(it) }
     private val firestore = firebaseApp?.let { app ->
-        runCatching { FirebaseFirestore.getInstance(app, FIRESTORE_DATABASE_ID) }.getOrNull()
+        runCatching {
+            val databaseId = HubMindRuntime.config?.firestoreDatabaseId ?: "(default)"
+            if (databaseId == "(default)") FirebaseFirestore.getInstance(app)
+            else FirebaseFirestore.getInstance(app, databaseId)
+        }.getOrNull()
     }
 
     override val configurationError: String? = when {
         context == null -> "Firebase Android configuration is unavailable in this test context."
-        firebaseApp == null -> "Firebase is not configured for this Android app. Register the Android package in the existing Hub-Mind Firebase project and add app/google-services.json."
-        firebaseAuth == null || firestore == null -> "Firebase could not be initialised. Check app/google-services.json and the registered Android package."
+        firebaseApp == null -> "Firebase is not configured. Check the shared Hub-Mind backend configuration endpoint."
+        firebaseAuth == null || firestore == null -> "Firebase could not be initialised from the shared Hub-Mind backend configuration."
         else -> null
     }
 
