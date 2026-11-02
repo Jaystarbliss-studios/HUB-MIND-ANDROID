@@ -16,8 +16,8 @@ data class SettingsUiState(
     val confirmHighRiskSpoken: Boolean = true,
     val memoryEnabled: Boolean = true,
     val contextScannerEnabled: Boolean = true,
-    val hasAudioPermission: Boolean = true,
-    val hasNotificationPermission: Boolean = true,
+    val hasAudioPermission: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
     val hasOverlayPermission: Boolean = false,
     val isAccessibilityConnected: Boolean = false,
     val isAccessibilityEnabled: Boolean = false,
@@ -28,7 +28,8 @@ data class SettingsUiState(
     val activeLeaseOwner: String? = null,
     val serverBaseUrl: String = "https://hub-mind.netlify.app",
     val testActionResult: String? = null,
-    val actionHistory: List<AndroidActionResult> = emptyList()
+    val actionHistory: List<AndroidActionResult> = emptyList(),
+    val sessionNotice: String? = null
 )
 
 class SettingsViewModel(
@@ -85,6 +86,12 @@ class SettingsViewModel(
             }
         }
 
+        viewModelScope.launch {
+            HubMindAgentForegroundService.isRunning.collect { running ->
+                _uiState.value = _uiState.value.copy(isForegroundSessionActive = running)
+            }
+        }
+
         permissionStatusRepository.refresh()
         val bat = androidAgentController.getBatteryLevel()
         val vol = androidAgentController.getSystemAudioVolume()
@@ -124,13 +131,16 @@ class SettingsViewModel(
     }
 
     fun toggleForegroundSession(context: Context) {
-        val next = !_uiState.value.isForegroundSessionActive
-        if (next) {
-            HubMindAgentForegroundService.startService(context)
-        } else {
+        if (_uiState.value.isForegroundSessionActive) {
             HubMindAgentForegroundService.stopService(context)
+            _uiState.value = _uiState.value.copy(sessionNotice = null)
+        } else {
+            val started = HubMindAgentForegroundService.startService(context)
+            _uiState.value = _uiState.value.copy(
+                sessionNotice = if (started) null
+                    else "Android did not allow the foreground session to start. Check notifications and system settings."
+            )
         }
-        _uiState.value = _uiState.value.copy(isForegroundSessionActive = next)
     }
 
     fun executeTestLocalAction(type: AndroidActionType, params: Map<String, Any> = emptyMap()) {
