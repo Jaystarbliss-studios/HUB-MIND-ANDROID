@@ -72,7 +72,8 @@ object ServiceLocator {
             conversationRepository = conversationRepository,
             authRepository = authRepository,
             deviceControlRepository = deviceControlRepository,
-            deviceRegistryRepository = deviceRegistryRepository
+            deviceRegistryRepository = deviceRegistryRepository,
+            context = requireNotNull(appContext)
         )
     }
 
