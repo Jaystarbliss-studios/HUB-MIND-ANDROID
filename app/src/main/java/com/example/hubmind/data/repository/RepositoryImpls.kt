@@ -156,9 +156,16 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
         if (!snapshot.exists() && email in ADMIN_EMAILS) {
             val displayName = firebaseUser.displayName?.takeIf { it.isNotBlank() }
                 ?: email.substringBefore("@")
+            val usernameBase = email.substringBefore("@")
+                .lowercase()
+                .replace(Regex("[^a-z0-9_]"), "")
+                .take(22)
+                .ifBlank { "hubmind" }
+            val username = usernameBase + "_" + uid.takeLast(6).lowercase()
             val now = java.time.Instant.now().toString()
             val bootstrapProfile = mapOf(
                 "id" to uid,
+                "username" to username,
                 "email" to email,
                 "name" to displayName,
                 "displayName" to displayName,
@@ -180,14 +187,10 @@ class AuthRepositoryImpl(context: Context? = null) : AuthRepository {
 
         val data = snapshot.data.orEmpty()
         val status = (data["status"] as? String).orEmpty()
-        if (status != "active") {
-            throw IllegalStateException(
-                if (status == "suspended" || status == "inactive") {
-                    "Your Hub-Mind account is currently inactive. Contact an administrator."
-                } else {
-                    "Your Hub-Mind account is not active yet. Contact an administrator."
-                }
-            )
+        // Match the website: only explicit inactive/suspended states block
+        // sign-in. Other valid profile states (including training) are retained.
+        if (status == "suspended" || status == "inactive") {
+            throw IllegalStateException("Your Hub-Mind account is currently inactive. Contact an administrator.")
         }
 
         return User(
