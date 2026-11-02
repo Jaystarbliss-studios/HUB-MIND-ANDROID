@@ -20,11 +20,12 @@ data class SettingsUiState(
     val hasNotificationPermission: Boolean = true,
     val hasOverlayPermission: Boolean = false,
     val isAccessibilityConnected: Boolean = false,
+    val isAccessibilityEnabled: Boolean = false,
     val isAdvancedControlAvailable: Boolean = false,
     val isForegroundSessionActive: Boolean = false,
-    val batteryPercent: Int = 88,
+    val batteryPercent: Int = 0,
     val systemVolume: Int = 75,
-    val activeLeaseOwner: String? = "android",
+    val activeLeaseOwner: String? = null,
     val serverBaseUrl: String = "https://hub-mind.netlify.app",
     val testActionResult: String? = null,
     val actionHistory: List<AndroidActionResult> = emptyList()
@@ -72,7 +73,8 @@ class SettingsViewModel(
         viewModelScope.launch {
             permissionStatusRepository.hasAccessibilityService.collect { acc ->
                 _uiState.value = _uiState.value.copy(
-                    isAccessibilityConnected = HubMindAccessibilityService.isServiceConnected || acc
+                    isAccessibilityEnabled = acc,
+                    isAccessibilityConnected = HubMindAccessibilityService.isServiceConnected
                 )
             }
         }
@@ -83,6 +85,7 @@ class SettingsViewModel(
             }
         }
 
+        permissionStatusRepository.refresh()
         val bat = androidAgentController.getBatteryLevel()
         val vol = androidAgentController.getSystemAudioVolume()
         _uiState.value = _uiState.value.copy(
@@ -113,13 +116,10 @@ class SettingsViewModel(
         _uiState.value = _uiState.value.copy(contextScannerEnabled = enabled)
     }
 
-    fun toggleOverlayPermission() {
-        val next = !_uiState.value.hasOverlayPermission
-        permissionStatusRepository.updatePermissions(
-            audio = _uiState.value.hasAudioPermission,
-            notifications = _uiState.value.hasNotificationPermission,
-            overlay = next,
-            accessibility = _uiState.value.isAccessibilityConnected
+    fun refreshPermissions() {
+        permissionStatusRepository.refresh()
+        _uiState.value = _uiState.value.copy(
+            isAccessibilityConnected = HubMindAccessibilityService.isServiceConnected
         )
     }
 
