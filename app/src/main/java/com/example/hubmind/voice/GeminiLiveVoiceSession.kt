@@ -53,6 +53,7 @@ class GeminiLiveVoiceSession(
     private val onJessState: (JessLiveState) -> Unit,
     private val onUserTranscript: (String) -> Unit,
     private val onJessTranscript: (String) -> Unit,
+    private val onTurnComplete: () -> Unit,
     private val onError: (String) -> Unit
 ) {
     private val appContext = context.applicationContext
@@ -69,6 +70,8 @@ class GeminiLiveVoiceSession(
     private val isClosed = AtomicBoolean(false)
     private val isReady = AtomicBoolean(false)
     private var setupComplete: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
+    val isConnected: Boolean get() = isReady.get()
 
     suspend fun connect(userName: String, userRole: String, systemContext: String = ""): Boolean {
         if (isReady.get()) return true
@@ -226,6 +229,7 @@ class GeminiLiveVoiceSession(
                 }
 
                 if (serverContent.optBoolean("turnComplete")) {
+                    onTurnComplete()
                     onJessState(JessLiveState.LISTENING)
                 } else if (parts != null && parts.length() > 0) {
                     onJessState(JessLiveState.SPEAKING)
