@@ -12,6 +12,7 @@ import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.agent.AndroidLiveToolExecutor
 import com.example.hubmind.voice.GeminiLiveVoiceSession
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -87,8 +88,11 @@ class JessHomeViewModel(
 
     init {
         viewModelScope.launch {
+            withTimeoutOrNull(10_000) { conversationRepository.awaitReady() }
             if (conversationRepository.currentConversation.value == null) {
-                conversationRepository.createConversation("New Jess Conversation")
+                val existing = conversationRepository.conversations.value.firstOrNull()
+                if (existing != null) conversationRepository.selectConversation(existing.id)
+                else conversationRepository.createConversation("New Jess Conversation")
             }
             conversationRepository.currentConversation.collect { conv ->
                 _uiState.update { it.copy(currentConversation = conv) }
