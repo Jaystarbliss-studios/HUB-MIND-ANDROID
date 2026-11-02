@@ -12,6 +12,15 @@ import android.os.Build
 import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.activity.ComponentActivity
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.lifecycle.lifecycleScope
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.launch
 import com.example.hubmind.agent.AndroidActionType
 import com.example.hubmind.agent.AndroidAppLauncher
 import com.example.hubmind.agent.AndroidCommand
@@ -84,6 +93,49 @@ class AndroidNativeBridge(
         if (!isValidToken(token)) return
         activity.getSharedPreferences("hubmind_native", Context.MODE_PRIVATE).edit().putBoolean("agent_session_active", false).apply()
         activity.runOnUiThread { HubMindAgentForegroundService.stopService(activity) }
+    }
+
+    @JavascriptInterface
+    fun beginGoogleSignIn(clientId: String, token: String, callbackId: String) {
+        if (!isValidToken(token)) {
+            deliver(callbackId, JSONObject().put("success", false).put("error", "Native bridge authentication failed."))
+            return
+        }
+        if (clientId.isBlank()) {
+            deliver(callbackId, JSONObject().put("success", false).put("error", "Google sign-in is not configured for this deployment."))
+            return
+        }
+        val host = activity as? ComponentActivity
+        if (host == null) {
+            deliver(callbackId, JSONObject().put("success", false).put("error", "Google sign-in requires the Hub-Mind Android activity."))
+            return
+        }
+        host.lifecycleScope.launch {
+            try {
+                val googleOption = GetGoogleIdOption.Builder()
+                    .setServerClientId(clientId)
+                    .setFilterByAuthorizedAccounts(false)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleOption)
+                    .build()
+                val result = CredentialManager.create(activity).getCredential(activity, request)
+                val credential = result.credential
+                if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                    deliver(callbackId, JSONObject().put("success", true).put("idToken", googleCredential.idToken))
+                } else {
+                    deliver(callbackId, JSONObject().put("success", false).put("error", "Google did not return a supported sign-in credential."))
+                }
+            } catch (error: GetCredentialException) {
+                deliver(callbackId, JSONObject().put("success", false).put("cancelled", error.type.contains("CANCELED", true))
+                    .put("error", error.message ?: "Google sign-in was cancelled or could not be completed."))
+            } catch (error: Exception) {
+                deliver(callbackId, JSONObject().put("success", false)
+                    .put("error", error.message ?: "Google sign-in failed on this Android device."))
+            }
+        }
     }
 
     @JavascriptInterface
