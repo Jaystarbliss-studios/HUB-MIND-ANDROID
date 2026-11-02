@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.hubmind.di.ServiceLocator
 import com.example.hubmind.ui.components.HubMindBottomBar
 import com.example.hubmind.ui.components.HubMindNavDestination
@@ -35,17 +34,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HubMindTheme {
-                var isAuthenticated by remember { mutableStateOf(true) }
+                val authRepository = ServiceLocator.authRepository
+                val signedInUser by authRepository.currentUser.collectAsState()
+                val authViewModel = remember { AuthViewModel(authRepository) }
                 var currentTab by remember { mutableStateOf(HubMindNavDestination.JESS) }
 
-                if (!isAuthenticated) {
-                    val authViewModel = remember {
-                        AuthViewModel(ServiceLocator.authRepository)
-                    }
-                    AuthScreen(
-                        viewModel = authViewModel,
-                        onAuthSuccess = { isAuthenticated = true }
-                    )
+                if (signedInUser == null) {
+                    AuthScreen(viewModel = authViewModel)
                 } else {
                     BackHandler(enabled = currentTab != HubMindNavDestination.JESS) {
                         currentTab = HubMindNavDestination.JESS
@@ -107,7 +102,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     SettingsScreen(
                                         viewModel = settingsViewModel,
-                                        onSignOut = { isAuthenticated = false }
+                                        onSignOut = { /* auth state drives navigation back to sign-in */ }
                                     )
                                 }
                             }
