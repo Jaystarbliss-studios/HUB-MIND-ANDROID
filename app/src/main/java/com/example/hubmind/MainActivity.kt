@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -28,6 +30,16 @@ import com.example.hubmind.ui.theme.HubMindTheme
 import com.example.hubmind.ui.theme.Slate950
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        runCatching {
+            ServiceLocator.permissionStatusRepository.refresh()
+            lifecycleScope.launch {
+                ServiceLocator.deviceRegistryRepository.refreshDevices()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
