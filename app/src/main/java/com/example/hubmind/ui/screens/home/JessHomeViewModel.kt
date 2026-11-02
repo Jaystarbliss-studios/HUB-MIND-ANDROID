@@ -15,7 +15,6 @@ import com.example.hubmind.voice.GeminiLiveVoiceSession
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 data class JessHomeUiState(
     val currentConversation: Conversation? = null,
@@ -47,11 +46,16 @@ class JessHomeViewModel(
     private var pendingLiveUserText = ""
     private val pendingLiveAssistantText = StringBuilder()
 
-    private val liveVoiceSession = GeminiLiveVoiceSession(
+    private val liveVoiceSession: GeminiLiveVoiceSession = GeminiLiveVoiceSession(
         context = appContext,
         authRepository = authRepository,
         onConnectionState = { connection ->
-            _uiState.update { it.copy(connectionState = connection) }
+            _uiState.update {
+                it.copy(
+                    connectionState = connection,
+                    isMicActive = if (connection == LiveConnectionState.DISCONNECTED || connection == LiveConnectionState.ERROR) false else it.isMicActive
+                )
+            }
         },
         onJessState = { state ->
             _uiState.update { it.copy(liveState = state) }
@@ -189,15 +193,15 @@ class JessHomeViewModel(
                 val memories = user?.id?.let { HubMindMemoryContext.load(it) }.orEmpty()
                 val sharedContext = buildString {
                     if (memories.isNotBlank()) {
-                        append("Saved Hub-Mind user memories:\\n")
+                        append("Saved Hub-Mind user memories:\n")
                         append(memories)
                     }
                     if (recentMessages.isNotEmpty()) {
-                        append("\\n\\nRecent shared Jess conversation:\\n")
+                        append("\n\nRecent shared Jess conversation:\n")
                         recentMessages.forEach { message ->
                             append(if (message.sender == MessageSender.USER) "User: " else "Jess: ")
                             append(message.text)
-                            append("\\n")
+                            append("\n")
                         }
                     }
                 }
