@@ -8,6 +8,7 @@ import com.example.hubmind.data.repository.AuthRepository
 import com.example.hubmind.data.repository.ConversationRepository
 import com.example.hubmind.data.repository.DeviceRegistryRepository
 import com.example.hubmind.data.repository.JessRepository
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.voice.GeminiLiveVoiceSession
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -36,11 +37,13 @@ class JessHomeViewModel(
     private val _uiState = MutableStateFlow(JessHomeUiState())
     val uiState: StateFlow<JessHomeUiState> = _uiState.asStateFlow()
 
+    private val appContext = context.applicationContext
+    private var foregroundStartedForVoice = false
     private var pendingLiveUserText = ""
     private val pendingLiveAssistantText = StringBuilder()
 
     private val liveVoiceSession = GeminiLiveVoiceSession(
-        context = context.applicationContext,
+        context = appContext,
         authRepository = authRepository,
         onConnectionState = { connection ->
             _uiState.update { it.copy(connectionState = connection) }
@@ -141,6 +144,10 @@ class JessHomeViewModel(
         if (_uiState.value.isMicActive) {
             viewModelScope.launch {
                 liveVoiceSession.disconnect()
+                if (foregroundStartedForVoice) {
+                    HubMindAgentForegroundService.stopService(appContext)
+                    foregroundStartedForVoice = false
+                }
                 _uiState.update {
                     it.copy(
                         isMicActive = false,
@@ -151,12 +158,19 @@ class JessHomeViewModel(
             }
         } else {
             viewModelScope.launch {
+                if (!HubMindAgentForegroundService.isRunning.value) {
+                    foregroundStartedForVoice = HubMindAgentForegroundService.startService(appContext)
+                }
                 val user = authRepository.currentUser.value
                 val started = liveVoiceSession.connect(
                     userName = user?.preferredName?.takeIf { it.isNotBlank() }
                         ?: user?.displayName.orEmpty(),
                     userRole = user?.role.orEmpty()
                 )
+                if (!started && foregroundStartedForVoice) {
+                    HubMindAgentForegroundService.stopService(appContext)
+                    foregroundStartedForVoice = false
+                }
                 _uiState.update {
                     it.copy(
                         isMicActive = started,
@@ -247,6 +261,7 @@ class JessHomeViewModel(
 
     override fun onCleared() {
         liveVoiceSession.dispose()
+        if (foregroundStartedForVoice) HubMindAgentForegroundService.stopService(appContext)
         super.onCleared()
     }
 }
