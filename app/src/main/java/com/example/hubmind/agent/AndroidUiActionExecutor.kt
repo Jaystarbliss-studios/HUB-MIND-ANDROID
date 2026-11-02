@@ -33,8 +33,13 @@ class AndroidUiActionExecutor(private val context: Context) {
         try {
             when (command.actionType) {
                 AndroidActionType.TAP -> {
-                    val x = (command.parameters["x"] as? Number)?.toFloat() ?: 500f
-                    val y = (command.parameters["y"] as? Number)?.toFloat() ?: 1000f
+                    val x = (command.parameters["x"] as? Number)?.toFloat()
+                    val y = (command.parameters["y"] as? Number)?.toFloat()
+                    if (x == null || y == null) return@withContext AndroidActionResult(
+                        commandId = command.commandId, actionType = command.actionType, success = false,
+                        error = "Tap requires current-screen x and y coordinates or an accessible targetText/viewId.",
+                        durationMs = System.currentTimeMillis() - startTime
+                    )
                     if (service == null) {
                         return@withContext AndroidActionResult(
                             commandId = command.commandId,
@@ -57,8 +62,13 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
 
                 AndroidActionType.DOUBLE_TAP -> {
-                    val x = (command.parameters["x"] as? Number)?.toFloat() ?: 500f
-                    val y = (command.parameters["y"] as? Number)?.toFloat() ?: 1000f
+                    val x = (command.parameters["x"] as? Number)?.toFloat()
+                    val y = (command.parameters["y"] as? Number)?.toFloat()
+                    if (x == null || y == null) return@withContext AndroidActionResult(
+                        commandId = command.commandId, actionType = command.actionType, success = false,
+                        error = "Double tap requires current-screen x and y coordinates.",
+                        durationMs = System.currentTimeMillis() - startTime
+                    )
                     val ok = if (service == null) false else {
                         val first = awaitGesture { callback -> service.performTapAt(x, y, onComplete = callback) }
                         if (first) delay(120)
@@ -75,8 +85,13 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
 
                 AndroidActionType.LONG_PRESS -> {
-                    val x = (command.parameters["x"] as? Number)?.toFloat() ?: 500f
-                    val y = (command.parameters["y"] as? Number)?.toFloat() ?: 1000f
+                    val x = (command.parameters["x"] as? Number)?.toFloat()
+                    val y = (command.parameters["y"] as? Number)?.toFloat()
+                    if (x == null || y == null) return@withContext AndroidActionResult(
+                        commandId = command.commandId, actionType = command.actionType, success = false,
+                        error = "Long press requires current-screen x and y coordinates.",
+                        durationMs = System.currentTimeMillis() - startTime
+                    )
                     val ok = service?.let { awaitGesture { callback -> it.performTapAt(x, y, durationMs = 800, onComplete = callback) } } ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
@@ -89,10 +104,15 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
 
                 AndroidActionType.SWIPE -> {
-                    val startX = (command.parameters["startX"] as? Number)?.toFloat() ?: 500f
-                    val startY = (command.parameters["startY"] as? Number)?.toFloat() ?: 1500f
-                    val endX = (command.parameters["endX"] as? Number)?.toFloat() ?: 500f
-                    val endY = (command.parameters["endY"] as? Number)?.toFloat() ?: 500f
+                    val startX = (command.parameters["startX"] as? Number)?.toFloat()
+                    val startY = (command.parameters["startY"] as? Number)?.toFloat()
+                    val endX = (command.parameters["endX"] as? Number)?.toFloat()
+                    val endY = (command.parameters["endY"] as? Number)?.toFloat()
+                    if (startX == null || startY == null || endX == null || endY == null) return@withContext AndroidActionResult(
+                        commandId = command.commandId, actionType = command.actionType, success = false,
+                        error = "Swipe requires startX, startY, endX and endY from the current screen.",
+                        durationMs = System.currentTimeMillis() - startTime
+                    )
                     val ok = service?.let { awaitGesture { callback -> it.performSwipe(startX, startY, endX, endY, onComplete = callback) } } ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
@@ -106,19 +126,13 @@ class AndroidUiActionExecutor(private val context: Context) {
 
                 AndroidActionType.SCROLL -> {
                     val direction = command.parameters["direction"] as? String ?: "down"
-                    val (sx, sy, ex, ey) = when (direction.lowercase()) {
-                        "up" -> listOf(500f, 450f, 500f, 1450f)
-                        "left" -> listOf(850f, 900f, 150f, 900f)
-                        "right" -> listOf(150f, 900f, 850f, 900f)
-                        else -> listOf(500f, 1450f, 500f, 450f)
-                    }
-                    val ok = service?.let { awaitGesture { callback -> it.performSwipe(sx, sy, ex, ey, onComplete = callback) } } ?: false
+                    val ok = service?.scrollActive(direction) ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
                         verified = false,
-                        outputText = if (ok) "Scroll gesture completed ($direction)" else "Scroll gesture could not be completed",
+                        outputText = if (ok) "Android accepted the accessibility scroll action ($direction)" else "No scrollable element accepted the accessibility action",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -187,7 +201,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         actionType = command.actionType,
                         success = launched,
                         verified = false,
-                        outputText = "Launched ${app.appName} (${app.packageName})",
+                        outputText = if (launched) "Android accepted the request to launch ${app.appName} (${app.packageName})" else "Android could not launch ${app.appName} (${app.packageName})",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
