@@ -25,7 +25,6 @@ import com.example.hubmind.agent.AndroidActionType
 import com.example.hubmind.agent.AndroidAppLauncher
 import com.example.hubmind.agent.AndroidCommand
 import com.example.hubmind.agent.AndroidUiActionExecutor
-import com.example.hubmind.agent.HubMindAgentForegroundService
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,7 +55,6 @@ class AndroidNativeBridge(
         }
         return JSONObject()
             .put("deviceId", "android-phone-$deviceId")
-            .put("agentSessionActive", prefs.getBoolean("agent_session_active", false))
             .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
             .put("platform", "ANDROID")
             .put("batteryPercent", battery)
@@ -79,20 +77,6 @@ class AndroidNativeBridge(
         activity.runOnUiThread {
             activity.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
-    }
-
-    @JavascriptInterface
-    fun startAgentSession(token: String) {
-        if (!isValidToken(token)) return
-        activity.getSharedPreferences("hubmind_native", Context.MODE_PRIVATE).edit().putBoolean("agent_session_active", true).apply()
-        activity.runOnUiThread { HubMindAgentForegroundService.startService(activity) }
-    }
-
-    @JavascriptInterface
-    fun stopAgentSession(token: String) {
-        if (!isValidToken(token)) return
-        activity.getSharedPreferences("hubmind_native", Context.MODE_PRIVATE).edit().putBoolean("agent_session_active", false).apply()
-        activity.runOnUiThread { HubMindAgentForegroundService.stopService(activity) }
     }
 
     @JavascriptInterface
@@ -165,16 +149,6 @@ class AndroidNativeBridge(
                 openAccessibilitySettings(bridgeToken)
                 return JSONObject().put("success", true).put("verified", false)
                     .put("message", "Opened Android Accessibility Settings. Enable Hub-Mind Accessibility there, then return to Hub-Mind.")
-            }
-            "START_AGENT_SESSION" -> {
-                startAgentSession(bridgeToken)
-                return JSONObject().put("success", true).put("verified", false)
-                    .put("message", "Started the user-requested Hub-Mind foreground device-control session.")
-            }
-            "STOP_AGENT_SESSION" -> {
-                stopAgentSession(bridgeToken)
-                return JSONObject().put("success", true).put("verified", true)
-                    .put("message", "Stopped the Hub-Mind foreground device-control session.")
             }
             "GET_DEVICE_STATUS" -> return deviceStatusResult()
             "GET_INSTALLED_APPS" -> return installedAppsResult()
