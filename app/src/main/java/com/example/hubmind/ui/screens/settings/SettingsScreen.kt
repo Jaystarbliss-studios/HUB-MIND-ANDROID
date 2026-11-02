@@ -262,53 +262,28 @@ fun SettingsScreen(
                 }
             }
 
-            // Section: Cross-Device Control & Permission Mode
-            SettingsSectionHeader(title = "Cross-Device Control Policies")
+            // Cross-device transport is intentionally not advertised as active until
+            // the authenticated relay and Windows receiver are implemented.
+            SettingsSectionHeader(title = "Cross-Device Connection")
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Permission Mode", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.SemiBold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("ask" to "Ask", "allow-routine" to "Allow Routine", "allow-everything" to "Allow All").forEach { (modeKey, label) ->
-                            val selected = state.permissionMode == modeKey
-                            Button(
-                                onClick = { viewModel.setPermissionMode(modeKey) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selected) Teal600 else Slate800,
-                                    contentColor = if (selected) Slate950 else Slate300
-                                )
-                            ) {
-                                Text(label, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-                            }
-                        }
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Devices, contentDescription = null, tint = Amber400)
+                        Text("Windows connection not configured", color = Slate100, fontWeight = FontWeight.SemiBold)
                     }
-
-                    Divider(color = Slate800, thickness = 1.dp)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Full Control Master Switch", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.SemiBold)
-                            Text("Allows executing Win32 commands and window snapping", style = MaterialTheme.typography.bodySmall, color = Slate400)
-                        }
-                        Switch(
-                            checked = state.fullControlEnabled,
-                            onCheckedChange = viewModel::toggleFullControl,
-                            colors = SwitchDefaults.colors(checkedThumbColor = Teal400, checkedTrackColor = Teal900)
-                        )
-                    }
+                    Text(
+                        "This build currently reports this Android phone only. The authenticated device registry, live command relay and Windows agent receiver still need to be connected. Remote commands will be rejected rather than simulated.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Slate400
+                    )
                 }
             }
 
