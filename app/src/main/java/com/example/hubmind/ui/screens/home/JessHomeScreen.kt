@@ -133,10 +133,9 @@ fun JessHomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val chips = listOf(
-                    "Launch VS Code on PC" to "Launch Visual Studio Code on my Windows workstation",
-                    "Query PC Diagnostics" to "Check system info and diagnostics on my PC",
-                    "Take PC Screenshot" to "Take a screenshot of my Windows desktop",
-                    "Check Studio Tasks" to "What studio operations tasks are pending today?"
+                    "What can you do?" to "Explain what Jess can currently do in this Android build.",
+                    "Android agent setup" to "How do I enable and safely test the Hub-Mind Android agent?",
+                    "Connection status" to "Explain which Hub-Mind services are connected and which still need setup."
                 )
                 items(chips) { (label, prompt) ->
                     Surface(
