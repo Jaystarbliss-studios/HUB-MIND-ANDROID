@@ -154,7 +154,9 @@ class HubMindAccessibilityService : AccessibilityService() {
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val accepted = focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (!accepted) return false
+        return focus.text?.toString() == text
     }
 
     fun captureScreenBase64(onComplete: (String?) -> Unit) {
