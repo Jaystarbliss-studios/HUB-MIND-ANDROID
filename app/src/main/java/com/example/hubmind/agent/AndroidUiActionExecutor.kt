@@ -3,6 +3,9 @@ package com.example.hubmind.agent
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class AndroidUiActionExecutor(private val context: Context) {
 
@@ -41,14 +44,14 @@ class AndroidUiActionExecutor(private val context: Context) {
                             durationMs = System.currentTimeMillis() - startTime
                         )
                     }
-                    var done = false
-                    service.performTapAt(x, y) { success -> done = success }
+                    val ok = awaitGesture { callback -> service.performTapAt(x, y, onComplete = callback) }
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = true,
-                        verified = true,
-                        outputText = "Dispatched tap at ($x, $y)",
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Tap completed at ($x, $y)" else "Android rejected the tap gesture",
+                        error = if (ok) null else "Tap gesture was cancelled by Android.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -56,14 +59,17 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.DOUBLE_TAP -> {
                     val x = (command.parameters["x"] as? Number)?.toFloat() ?: 500f
                     val y = (command.parameters["y"] as? Number)?.toFloat() ?: 1000f
-                    service?.performTapAt(x, y)
-                    service?.performTapAt(x, y)
+                    val ok = if (service == null) false else {
+                        val first = awaitGesture { callback -> service.performTapAt(x, y, onComplete = callback) }
+                        if (first) delay(120)
+                        first && awaitGesture { callback -> service.performTapAt(x, y, onComplete = callback) }
+                    }
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = service != null,
-                        verified = service != null,
-                        outputText = "Dispatched double tap at ($x, $y)",
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Double tap completed at ($x, $y)" else "Double tap could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -71,13 +77,13 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.LONG_PRESS -> {
                     val x = (command.parameters["x"] as? Number)?.toFloat() ?: 500f
                     val y = (command.parameters["y"] as? Number)?.toFloat() ?: 1000f
-                    service?.performTapAt(x, y, durationMs = 800)
+                    val ok = service?.let { awaitGesture { callback -> it.performTapAt(x, y, durationMs = 800, onComplete = callback) } } ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = service != null,
-                        verified = service != null,
-                        outputText = "Dispatched long press at ($x, $y)",
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Long press completed at ($x, $y)" else "Long press could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -87,25 +93,46 @@ class AndroidUiActionExecutor(private val context: Context) {
                     val startY = (command.parameters["startY"] as? Number)?.toFloat() ?: 1500f
                     val endX = (command.parameters["endX"] as? Number)?.toFloat() ?: 500f
                     val endY = (command.parameters["endY"] as? Number)?.toFloat() ?: 500f
-                    service?.performSwipe(startX, startY, endX, endY)
+                    val ok = service?.let { awaitGesture { callback -> it.performSwipe(startX, startY, endX, endY, onComplete = callback) } } ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = service != null,
-                        verified = service != null,
-                        outputText = "Dispatched swipe from ($startX, $startY) to ($endX, $endY)",
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Swipe completed from ($startX, $startY) to ($endX, $endY)" else "Swipe gesture could not be completed",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
 
                 AndroidActionType.SCROLL -> {
-                    service?.performSwipe(500f, 1200f, 500f, 400f)
+                    val direction = command.parameters["direction"] as? String ?: "down"
+                    val (sx, sy, ex, ey) = when (direction.lowercase()) {
+                        "up" -> listOf(500f, 450f, 500f, 1450f)
+                        "left" -> listOf(850f, 900f, 150f, 900f)
+                        "right" -> listOf(150f, 900f, 850f, 900f)
+                        else -> listOf(500f, 1450f, 500f, 450f)
+                    }
+                    val ok = service?.let { awaitGesture { callback -> it.performSwipe(sx, sy, ex, ey, onComplete = callback) } } ?: false
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = service != null,
-                        verified = service != null,
-                        outputText = "Dispatched vertical scroll",
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Scroll gesture completed ($direction)" else "Scroll gesture could not be completed",
+                        durationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                AndroidActionType.CLICK_UI_ELEMENT -> {
+                    val targetText = command.parameters["targetText"] as? String ?: ""
+                    val viewId = command.parameters["viewId"] as? String ?: ""
+                    val ok = service?.clickNode(targetText, viewId) ?: false
+                    AndroidActionResult(
+                        commandId = command.commandId,
+                        actionType = command.actionType,
+                        success = ok,
+                        verified = ok,
+                        outputText = if (ok) "Activated the matching accessible UI element" else "No matching clickable UI element was found",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -192,12 +219,22 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
 
                 AndroidActionType.CAPTURE_SCREEN -> {
+                    val image = service?.let { svc ->
+                        suspendCancellableCoroutine<String?> { continuation ->
+                            svc.captureScreenBase64 { value ->
+                                if (continuation.isActive) continuation.resume(value)
+                            }
+                        }
+                    }
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = true,
-                        verified = true,
-                        outputText = "Screen capture session buffer requested",
+                        success = image != null,
+                        verified = image != null,
+                        screenshotBase64 = image,
+                        screenshotMimeType = if (image != null) "image/jpeg" else null,
+                        outputText = if (image != null) "Captured the current phone screen." else "Screen capture failed or is not supported by this Android version.",
+                        error = if (image != null) null else "Android did not return a screenshot.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -297,4 +334,11 @@ class AndroidUiActionExecutor(private val context: Context) {
             )
         }
     }
+    private suspend fun awaitGesture(register: ((Boolean) -> Unit) -> Unit): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            register { success ->
+                if (continuation.isActive) continuation.resume(success)
+            }
+        }
+
 }
