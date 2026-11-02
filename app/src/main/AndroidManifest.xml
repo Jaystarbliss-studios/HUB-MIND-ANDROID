@@ -1,31 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Normal permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-
-    <!-- Runtime permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Private device-control permissions -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Limit package visibility to applications with a launcher activity.
+         This is sufficient for AndroidAppLauncher and avoids QUERY_ALL_PACKAGES. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name="com.example.hubmind.HubMindApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.HubMind">
-        
+
         <activity
             android:name="com.example.hubmind.MainActivity"
             android:exported="true"
@@ -37,7 +39,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Accessibility Service -->
         <service
             android:name="com.example.hubmind.agent.HubMindAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -50,30 +51,19 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Active Control Foreground Service -->
         <service
             android:name="com.example.hubmind.agent.HubMindAgentForegroundService"
             android:foregroundServiceType="specialUse"
-            android:exported="false" />
-
-        <!-- Optional Voice Interaction Service (Default Assistant Role) -->
-        <service
-            android:name="com.example.hubmind.voice.HubMindVoiceInteractionService"
-            android:permission="android.permission.BIND_VOICE_INTERACTION"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.voice.VoiceInteractionService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.speech"
-                android:resource="@xml/accessibility_service_config" />
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started Hub-Mind device-control session" />
         </service>
 
-        <service
-            android:name="com.example.hubmind.voice.HubMindVoiceInteractionSessionService"
-            android:permission="android.permission.BIND_VOICE_INTERACTION"
-            android:exported="true" />
-
+        <!-- VoiceInteractionService is intentionally not advertised yet.
+             The current implementation is only a stub and must not be offered
+             as the phone's default assistant until its session lifecycle and
+             assistant metadata are implemented and tested. -->
     </application>
 
 </manifest>
