@@ -513,7 +513,7 @@ class DeviceRegistryRepositoryImpl(private val context: Context) : DeviceRegistr
             }.getOrDefault("unknown"),
             status = DeviceStatus.ONLINE,
             isCurrentDevice = true,
-            fullControlActive = HubMindAccessibilityService.isServiceConnected,
+            fullControlActive = HubMindAccessibilityService.isServiceConnected && HubMindAgentForegroundService.isRunning.value,
             permissionMode = "ask",
             capabilities = capabilities,
             batteryPercent = battery
