@@ -628,7 +628,7 @@ class DeviceControlRepositoryImpl(
 class AndroidAgentControllerImpl(private val context: Context) : AndroidAgentController {
     override fun getBatteryLevel(): Int {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        return bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 88
+        return bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 } ?: -1
     }
 
     override fun isCharging(): Boolean {
@@ -638,21 +638,28 @@ class AndroidAgentControllerImpl(private val context: Context) : AndroidAgentCon
     }
 
     override fun getInstalledAppPackages(): List<String> {
-        return listOf("com.google.android.apps.docs", "com.google.android.gm", "com.android.chrome")
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return context.packageManager.queryIntentActivities(launcherIntent, 0)
+            .mapNotNull { it.activityInfo?.packageName }
+            .distinct()
+            .sorted()
     }
 
     override fun launchApplication(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
         val intent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return false
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return true
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
     }
 
     override fun getSystemAudioVolume(): Int {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         val max = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
         val current = am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 10
-        return (current * 100) / max
+        return if (max > 0) (current * 100) / max else 0
     }
 
     override fun setSystemAudioVolume(levelPercent: Int) {
