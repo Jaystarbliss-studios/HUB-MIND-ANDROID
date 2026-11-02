@@ -40,7 +40,7 @@ object ServiceLocator {
     }
 
     val permissionStatusRepository: PermissionStatusRepository by lazy {
-        PermissionStatusRepositoryImpl()
+        PermissionStatusRepositoryImpl(requireNotNull(appContext))
     }
 
     val voiceInteractionRepository: VoiceInteractionRepository by lazy {
