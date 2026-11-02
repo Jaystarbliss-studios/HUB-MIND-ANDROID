@@ -11,7 +11,7 @@ object ServiceLocator {
     }
 
     val authRepository: AuthRepository by lazy {
-        AuthRepositoryImpl()
+        AuthRepositoryImpl(requireNotNull(appContext))
     }
 
     val conversationRepository: ConversationRepository by lazy {
