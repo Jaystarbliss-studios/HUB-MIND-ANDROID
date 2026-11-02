@@ -34,6 +34,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android 35 SDK packages
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
@@ -45,6 +47,9 @@ jobs:
 
       - name: Run unit tests and assemble APK
         run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Print debug signing certificate fingerprints
+        run: keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'SHA1:|SHA256:'
 
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
