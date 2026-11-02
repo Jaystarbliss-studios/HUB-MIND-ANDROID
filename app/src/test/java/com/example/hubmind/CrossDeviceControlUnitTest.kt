@@ -27,24 +27,26 @@ class CrossDeviceControlUnitTest {
     }
 
     @Test
-    fun testDeviceResolverQueries() {
+    fun testDeviceResolverOnlySelectsUnambiguousTargets() {
         val android = DeviceNode("android-01", "Hub-Mind Phone", DevicePlatform.ANDROID, "1.0", DeviceStatus.ONLINE)
         val win = DeviceNode("win-01", "ThinkPad P1", DevicePlatform.WINDOWS, "1.0", DeviceStatus.ONLINE)
         val devices = listOf(android, win)
 
         val phoneMatch = JessDeviceResolver.resolveDeviceQuery("open Settings on my phone", devices)
-        assertNotNull(phoneMatch)
         assertEquals("android-01", phoneMatch?.deviceId)
 
         val pcMatch = JessDeviceResolver.resolveDeviceQuery("open document on my laptop", devices)
-        assertNotNull(pcMatch)
         assertEquals("win-01", pcMatch?.deviceId)
+
+        assertNull(JessDeviceResolver.resolveDeviceQuery("open Settings", devices))
+        assertNull(JessDeviceResolver.resolveDeviceQuery("use my phone and laptop", devices))
     }
 
     @Test
-    fun testControlPlaneTransportDispatch() = runBlocking {
+    fun testUnimplementedControlPlaneDoesNotClaimDelivery() = runBlocking {
         val transport = HubMindControlPlaneTransportImpl()
         transport.connect("usr-01", "android-01")
+        assertFalse(transport.isConnected.value)
 
         val envelope = CommandEnvelope(
             issuingUserId = "usr-01",
@@ -54,7 +56,8 @@ class CrossDeviceControlUnitTest {
         )
 
         val result = transport.dispatchCommand(envelope)
-        assertTrue(result.success)
-        assertTrue(result.verified)
+        assertFalse(result.success)
+        assertFalse(result.verified)
+        assertTrue(result.error?.contains("No authenticated Hub-Mind control-plane connection") == true)
     }
 }
