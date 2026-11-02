@@ -16,6 +16,7 @@ interface AuthRepository {
 }
 
 interface ConversationRepository {
+    suspend fun awaitReady() = Unit
     val conversations: StateFlow<List<Conversation>>
     val currentConversation: StateFlow<Conversation?>
     fun getMessages(conversationId: String): Flow<List<ChatMessage>>
