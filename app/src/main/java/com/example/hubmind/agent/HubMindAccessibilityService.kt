@@ -5,8 +5,13 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 class HubMindAccessibilityService : AccessibilityService() {
 
@@ -24,39 +29,42 @@ class HubMindAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Active window event handling for dynamic dumper
+        // The agent reads the active hierarchy only when a user-authorised action requests it.
     }
 
-    override fun onInterrupt() {
-        // Interrupt callback
-    }
+    override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        if (instance == this) instance = null
         super.onDestroy()
-        if (instance == this) {
-            instance = null
-        }
     }
 
     fun dumpActiveHierarchy(): UiNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        return parseNode(root)
+        var visited = 0
+        return parseNode(root, depth = 0, visited = { visited++ })
     }
 
-    private fun parseNode(node: AccessibilityNodeInfo): UiNodeInfo {
+    private fun parseNode(
+        node: AccessibilityNodeInfo,
+        depth: Int,
+        visited: () -> Int
+    ): UiNodeInfo? {
+        val current = visited()
+        if (depth > MAX_HIERARCHY_DEPTH || current >= MAX_HIERARCHY_NODES) return null
+
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
         val children = mutableListOf<UiNodeInfo>()
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            if (child != null) {
-                children.add(parseNode(child))
-            }
+        for (index in 0 until node.childCount) {
+            if (current + children.size >= MAX_HIERARCHY_NODES) break
+            val child = node.getChild(index) ?: continue
+            parseNode(child, depth + 1, visited)?.let(children::add)
         }
 
         return UiNodeInfo(
-            id = node.viewIdResourceName ?: "node_${node.hashCode()}",
+            id = node.viewIdResourceName ?: "node_" + node.hashCode(),
             viewIdResourceName = node.viewIdResourceName,
             className = node.className?.toString(),
             packageName = node.packageName?.toString(),
@@ -70,56 +78,70 @@ class HubMindAccessibilityService : AccessibilityService() {
         )
     }
 
-    fun performTapAt(x: Float, y: Float, durationMs: Long = 100, onComplete: (Boolean) -> Unit = {}) {
-        val path = Path().apply {
-            moveTo(x, y)
-        }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
-            .build()
-
-        dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                onComplete(true)
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                onComplete(false)
-            }
-        }, null)
+    suspend fun performTapAt(x: Float, y: Float, durationMs: Long = 100): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGestureAwait(path, durationMs)
     }
 
-    fun performSwipe(
-        startX: Float, startY: Float,
-        endX: Float, endY: Float,
-        durationMs: Long = 300,
-        onComplete: (Boolean) -> Unit = {}
-    ) {
+    suspend fun performSwipe(
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        durationMs: Long = 300
+    ): Boolean {
         val path = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
         }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
-            .build()
-
-        dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                onComplete(true)
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                onComplete(false)
-            }
-        }, null)
+        return dispatchGestureAwait(path, durationMs)
     }
+
+    private suspend fun dispatchGestureAwait(path: Path, durationMs: Long): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            if (Looper.myLooper() != Looper.getMainLooper()) return@withContext false
+            suspendCancellableCoroutine { continuation ->
+                val gesture = GestureDescription.Builder()
+                    .addStroke(
+                        GestureDescription.StrokeDescription(
+                            path,
+                            0,
+                            durationMs.coerceIn(1L, 10_000L)
+                        )
+                    )
+                    .build()
+
+                val accepted = dispatchGesture(
+                    gesture,
+                    object : GestureResultCallback() {
+                        override fun onCompleted(gestureDescription: GestureDescription?) {
+                            if (continuation.isActive) continuation.resume(true)
+                        }
+
+                        override fun onCancelled(gestureDescription: GestureDescription?) {
+                            if (continuation.isActive) continuation.resume(false)
+                        }
+                    },
+                    null
+                )
+                if (!accepted && continuation.isActive) continuation.resume(false)
+            }
+        }
 
     fun performTextSetOnFocused(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
-        val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        return focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    fun screenWidthPx(): Int = resources.displayMetrics.widthPixels
+    fun screenHeightPx(): Int = resources.displayMetrics.heightPixels
+
+    private companion object Limits {
+        const val MAX_HIERARCHY_DEPTH = 24
+        const val MAX_HIERARCHY_NODES = 2500
     }
 }
