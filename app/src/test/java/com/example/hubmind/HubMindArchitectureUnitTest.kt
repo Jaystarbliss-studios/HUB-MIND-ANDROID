@@ -9,51 +9,69 @@ import org.junit.Test
 
 class HubMindArchitectureUnitTest {
 
-    @Test
-    fun testAuthRepositoryAdminAssignment() = runBlocking {
-        val authRepo = AuthRepositoryImpl()
-        val result = authRepo.signIn("johnrufai242@gmail.com", "any-password")
-        assertTrue(result.isSuccess)
-        val user = result.getOrNull()
-        assertNotNull(user)
-        assertEquals("admin", user?.role)
-        assertEquals("active", user?.status)
+    private fun testWindowsRegistry(): DeviceRegistryRepository {
+        val win = DeviceNode(
+            "win-01",
+            "Test Windows workstation",
+            DevicePlatform.WINDOWS,
+            "test",
+            DeviceStatus.ONLINE
+        )
+        return object : DeviceRegistryRepository {
+            override val devices = kotlinx.coroutines.flow.MutableStateFlow(listOf(win))
+            override val currentTargetDevice = kotlinx.coroutines.flow.MutableStateFlow<DeviceNode?>(win)
+            override suspend fun selectTargetDevice(deviceId: String) {}
+            override suspend fun registerCurrentDevice(androidNode: DeviceNode) {}
+            override suspend fun pingDevice(deviceId: String) = false
+            override suspend fun refreshDevices() {}
+        }
     }
 
     @Test
-    fun testDeviceRegistryContainsWindowsWorkstation() = runBlocking {
+    fun testAuthRepositoryDoesNotAcceptCredentialsWithoutFirebase() = runBlocking {
         val authRepo = AuthRepositoryImpl()
-        val convRepo = ConversationRepositoryImpl()
-        val deviceControl = DeviceControlRepositoryImpl(emptyList())
+        val result = authRepo.signIn("johnrufai242@gmail.com", "any-password")
+        assertTrue(result.isFailure)
+        assertNotNull(authRepo.configurationError)
+        assertNull(authRepo.currentUser.value)
+    }
 
-        // Test device command execution
+    @Test
+    fun testRemoteCommandFailsWithoutAuthenticatedTransport() = runBlocking {
+        val registry = testWindowsRegistry()
+        val deviceControl = DeviceControlRepositoryImpl(emptyList(), registry)
+
         val result = deviceControl.executeTool(
-            targetDeviceId = "win-main-workstation",
+            targetDeviceId = "win-01",
             toolName = "launch_windows_application",
             args = mapOf("appName" to "code.exe")
         )
-        assertTrue(result.success)
-        assertTrue(result.verified)
+
+        assertFalse(result.success)
+        assertFalse(result.verified)
+        assertTrue(result.error?.contains("No authenticated control transport") == true)
 
         val history = deviceControl.commandHistory.value
         assertEquals(1, history.size)
         assertEquals("launch_windows_application", history[0].toolName)
-        assertEquals(CommandStatus.COMPLETED, history[0].status)
+        assertEquals(CommandStatus.FAILED, history[0].status)
+        assertEquals(1, deviceControl.activityRecords.value.size)
     }
 
     @Test
-    fun testConversationPostingAndJessReplying() = runBlocking {
+    fun testConversationStartsEmptyAndCanBeCreated() = runBlocking {
         val convRepo = ConversationRepositoryImpl()
-        val currentConv = convRepo.currentConversation.value
-        assertNotNull(currentConv)
+        assertNull(convRepo.currentConversation.value)
+        assertTrue(convRepo.conversations.value.isEmpty())
 
-        val convId = currentConv!!.id
+        val currentConv = convRepo.createConversation("Test conversation")
+        val convId = currentConv.id
         val userMsg = convRepo.postUserMessage(convId, "Jess, check tasks")
         assertEquals(MessageSender.USER, userMsg.sender)
 
-        val jessMsg = convRepo.appendJessResponse(convId, "Tasks are up to date", null, "done_verified")
+        val jessMsg = convRepo.appendJessResponse(convId, "I cannot access the task service yet.", null, null)
         assertEquals(MessageSender.JESS, jessMsg.sender)
-        assertEquals("done_verified", jessMsg.executionStatus)
+        assertNull(jessMsg.executionStatus)
 
         val messages = convRepo.getMessages(convId).first()
         assertTrue(messages.any { it.id == userMsg.id })
@@ -61,29 +79,25 @@ class HubMindArchitectureUnitTest {
     }
 
     @Test
-    fun testJessLiveStateTransitions() = runBlocking {
+    fun testVoiceSessionIsNotReportedAsConnectedWithoutLiveTransport() = runBlocking {
         val convRepo = ConversationRepositoryImpl()
-        val deviceControl = DeviceControlRepositoryImpl(emptyList())
-        // Mock device registry
-        val deviceRegistry = object : DeviceRegistryRepository {
-            private val win = DeviceNode("win-01", "PC", DevicePlatform.WINDOWS, "1.0", DeviceStatus.ONLINE)
-            override val devices = kotlinx.coroutines.flow.MutableStateFlow(listOf(win))
-            override val currentTargetDevice = kotlinx.coroutines.flow.MutableStateFlow<DeviceNode?>(win)
-            override suspend fun selectTargetDevice(deviceId: String) {}
-            override suspend fun registerCurrentDevice(androidNode: DeviceNode) {}
-            override suspend fun pingDevice(deviceId: String) = true
-            override suspend fun refreshDevices() {}
-        }
+        val registry = testWindowsRegistry()
+        val deviceControl = DeviceControlRepositoryImpl(emptyList(), registry)
+        val jessRepo = JessRepositoryImpl(
+            conversationRepository = convRepo,
+            authRepository = AuthRepositoryImpl(),
+            deviceControlRepository = deviceControl,
+            deviceRegistryRepository = registry
+        )
 
-        val jessRepo = JessRepositoryImpl(convRepo, deviceControl, deviceRegistry)
         assertEquals(JessLiveState.IDLE, jessRepo.liveState.value)
-
-        jessRepo.startVoiceSession()
-        assertEquals(JessLiveState.LISTENING, jessRepo.liveState.value)
-        assertEquals(LiveConnectionState.CONNECTED, jessRepo.connectionState.value)
-        assertEquals("android", jessRepo.activeLeaseClient.value)
+        assertFalse(jessRepo.startVoiceSession())
+        assertEquals(JessLiveState.ERROR, jessRepo.liveState.value)
+        assertEquals(LiveConnectionState.ERROR, jessRepo.connectionState.value)
+        assertNull(jessRepo.activeLeaseClient.value)
 
         jessRepo.endVoiceSession()
         assertEquals(JessLiveState.IDLE, jessRepo.liveState.value)
+        assertEquals(LiveConnectionState.DISCONNECTED, jessRepo.connectionState.value)
     }
 }
