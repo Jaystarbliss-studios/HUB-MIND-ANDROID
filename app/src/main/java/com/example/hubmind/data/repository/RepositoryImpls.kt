@@ -351,9 +351,9 @@ class JessRepositoryImpl(
     private val authRepository: AuthRepository,
     private val deviceControlRepository: DeviceControlRepository,
     private val deviceRegistryRepository: DeviceRegistryRepository,
-    context: Context
+    context: Context? = null
 ) : JessRepository {
-    private val androidToolExecutor = AndroidLiveToolExecutor(context.applicationContext)
+    private val androidToolExecutor = context?.applicationContext?.let(::AndroidLiveToolExecutor)
     private val _liveState = MutableStateFlow(JessLiveState.IDLE)
     override val liveState: StateFlow<JessLiveState> = _liveState.asStateFlow()
 
@@ -473,7 +473,9 @@ class JessRepositoryImpl(
                         if (name.isBlank()) continue
                         val callId = call.optString("id").ifBlank { UUID.randomUUID().toString() }
                         val args = call.optJSONObject("args") ?: JSONObject()
-                        val result = androidToolExecutor.execute(name, args)
+                        val executor = androidToolExecutor
+                            ?: throw IllegalStateException("Native Android tools are unavailable in this context.")
+                        val result = executor.execute(name, args)
                         val response = JSONObject()
                             .put("name", name)
                             .put("id", callId)
