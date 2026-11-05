@@ -71,7 +71,15 @@ export async function firebaseAdminRequest(path: string, init: RequestInit = {})
 
 export function firestoreDocumentUrl(path: string) {
   const projectId = firebaseAdminProjectId();
-  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents/' + path;
+  // Keep Admin REST calls on the same named database as the web Firebase client.
+  // The workspace defaults to its dedicated Hub-Mind database, not "(default)".
+  const databaseId = process.env.FIRESTORE_DATABASE_ID
+    || process.env.VITE_FIRESTORE_DATABASE_ID
+    || 'ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430';
+  return 'https://firestore.googleapis.com/v1/projects/' +
+    encodeURIComponent(projectId) +
+    '/databases/' + encodeURIComponent(databaseId) +
+    '/documents/' + path;
 }
 
 export function firebaseAuthAdminUrl(operation: 'update' | 'delete') {
