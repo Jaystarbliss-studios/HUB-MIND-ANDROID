@@ -155,7 +155,9 @@ async function confirmRemoteDesktopAction(actionType, args = {}) {
   const fileAction = String(args?.action || '').toLowerCase();
   const needsFileConfirmation = actionType === 'manage_windows_files'
     && ['delete', 'remove', 'recycle', 'write', 'move', 'rename', 'copy'].includes(fileAction);
-  if (!warningActions.has(actionType) && !needsFileConfirmation) return true;
+  const needsWindowCloseConfirmation = actionType === 'manage_windows'
+    && String(args?.action || '').toLowerCase() === 'close_window';
+  if (!warningActions.has(actionType) && !needsFileConfirmation && !needsWindowCloseConfirmation) return true;
 
   const details = actionType === 'control_windows_power'
     ? 'This can lock, sleep, restart or shut down the Windows laptop.'
@@ -163,7 +165,9 @@ async function confirmRemoteDesktopAction(actionType, args = {}) {
       ? 'Selected files may be moved to the Windows Recycle Bin.'
       : actionType === 'run_windows_command_native'
         ? 'This requests a command on the Windows laptop.'
-        : 'This operation can change or close content on the Windows laptop.';
+        : needsWindowCloseConfirmation
+          ? 'This closes a Windows application window on the laptop. Unsaved work in that app may be lost.'
+          : 'This operation can change or close content on the Windows laptop.';
   const choice = await dialog.showMessageBox(getDialogParent(), {
     type: 'warning',
     buttons: ['Cancel', 'Allow once'],
