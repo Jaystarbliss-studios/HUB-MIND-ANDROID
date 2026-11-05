@@ -46,6 +46,7 @@ function publishJessTranscript(id: string, speaker: 'user' | 'jess', text: strin
     const entry = { id, speaker, text: String(text).slice(0, 12000), at: Date.now() };
     if (index >= 0) entries[index] = entry; else entries.push(entry);
     localStorage.setItem(DESKTOP_TRANSCRIPT_KEY, JSON.stringify(entries.slice(-40)));
+    try { (window as any).HubMindNative?.onJessTranscript?.(speaker, entry.text); } catch {}
   } catch { /* Transcript persistence must never interrupt the live voice session. */ }
 }
 const DEFAULT_POSITION = { x: 0.92, y: 0.88 };
@@ -243,7 +244,7 @@ export function JessFloatingAssistant() {
   const [remoteJessOwner, setRemoteJessOwner] = useState<JessSessionOwner | null>(null);
   const sessionEndingRef = useRef(false);
   const screenControlRef = useRef<{ timer: number | null; running: boolean; speed: number; direction: number; axis: 'x' | 'y' }>({ timer: null, running: false, speed: 3, direction: 1, axis: 'y' });
-  const screenShareRef = useRef<{ stream: MediaStream | null; timer: number | null; video: HTMLVideoElement | null; nativePlugin: any; nativeListener: any }>({ stream: null, timer: null, video: null, nativePlugin: null, nativeListener: null });
+  const screenShareRef = useRef<{ stream: MediaStream | null; timer: number | null; video: HTMLVideoElement | null; nativePlugin: any; nativeListener: any; nativeScreenSharing: boolean }>({ stream: null, timer: null, video: null, nativePlugin: null, nativeListener: null, nativeScreenSharing: false });
   const [screenSharingActive, setScreenSharingActive] = useState(false);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioInputId, setSelectedAudioInputId] = useState(() => { try { return localStorage.getItem('hubmind.jess.audioInputDeviceId') || ''; } catch { return ''; } });
@@ -364,6 +365,10 @@ export function JessFloatingAssistant() {
     share.nativeListener = null;
     if (share.nativePlugin?.stopSharing) await share.nativePlugin.stopSharing().catch(() => undefined);
     share.nativePlugin = null;
+    if (share.nativeScreenSharing) {
+      try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+      share.nativeScreenSharing = false;
+    }
     setScreenSharingActive(false);
     if (announce) setSpeechState({ text: 'Screen sharing has stopped.', speaker: 'jess', visible: true });
   }, []);
@@ -372,6 +377,13 @@ export function JessFloatingAssistant() {
     setScreenSharePrompt(false);
     const share = screenShareRef.current;
     try {
+      const nativeAndroid = (window as any).HubMindNative;
+      if (/Android/i.test(navigator.userAgent) && typeof nativeAndroid?.requestScreenCapture === 'function') {
+        share.nativeScreenSharing = true;
+        nativeAndroid.requestScreenCapture();
+        setSpeechState({ text: 'Approve Android screen sharing in the system dialog. Jess will receive a fresh screen snapshot about once per second while sharing is active.', speaker: 'jess', visible: true });
+        return;
+      }
       if (!isJessInstalledApp() || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
         throw new Error('This screen-sharing option is only available in the installed desktop app. Mobile cross-app sharing requires the native app.');
       }
@@ -426,6 +438,35 @@ export function JessFloatingAssistant() {
       setSpeechState({ text: error?.message || 'Screen sharing was cancelled or permission was denied.', speaker: 'jess', visible: true });
     }
   }, [stopScreenSharing]);
+
+  useEffect(() => {
+    const nativeAndroid = (window as any).HubMindNative;
+    if (!nativeAndroid) return;
+    const handleNativeScreenShare = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const share = screenShareRef.current;
+      if (detail.type === 'started') {
+        share.nativeScreenSharing = true;
+        setScreenSharingActive(true);
+        clientRef.current?.sendText('SCREEN SHARE STATUS: Android screen sharing is active. Jess will receive a new, bounded JPEG snapshot about once per second. Frames are snapshots, not continuous video; only describe pixels present in a received frame.');
+        setSpeechState({ text: 'Screen sharing is active. Jess can now see periodic snapshots of your Android screen. Say “stop screen sharing” when you are done.', speaker: 'jess', visible: true });
+      } else if (detail.type === 'frame' && typeof detail.dataUrl === 'string' && share.nativeScreenSharing) {
+        const delivered = clientRef.current?.sendScreenFrame(detail.dataUrl) === true;
+        if (!delivered) {
+          setSpeechState({ text: 'Android capture is active, but Jess is not receiving screen frames. Check that the Jess Live voice session is connected.', speaker: 'jess', visible: true });
+        }
+      } else if (detail.type === 'stopped') {
+        share.nativeScreenSharing = false;
+        setScreenSharingActive(false);
+      } else if (detail.type === 'error') {
+        share.nativeScreenSharing = false;
+        setScreenSharingActive(false);
+        setSpeechState({ text: String(detail.error || 'Android screen sharing could not start.'), speaker: 'jess', visible: true });
+      }
+    };
+    window.addEventListener('hubmind-native-screen-share', handleNativeScreenShare as EventListener);
+    return () => window.removeEventListener('hubmind-native-screen-share', handleNativeScreenShare as EventListener);
+  }, []);
 
   const jessSpeechAccumulatorRef = useRef<string>('');
   const jessTranscriptTurnIdRef = useRef<string | null>(null);
@@ -758,6 +799,10 @@ export function JessFloatingAssistant() {
             await stopShare();
             setScreenSharingActive(false);
             result.result.message = 'Screen sharing has stopped.';
+          } else if (/Android/i.test(navigator.userAgent) && typeof (window as any).HubMindNative?.requestScreenCapture === 'function') {
+            await stopShare();
+            setScreenSharePrompt(true);
+            result.result.message = 'I opened the Android screen-sharing confirmation. Tap “Share screen” and approve the system capture permission so I can see your phone screen.';
           } else if (!isJessInstalledApp()) {
             result.result = { success: false, error: 'Screen sharing is available only in the installed Hub-Mind app, not in a normal browser tab.' };
           } else {
@@ -930,7 +975,7 @@ export function JessFloatingAssistant() {
         }
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
         const stopShareCommand = /\b(stop|end|turn off|finish|cancel)\s+(?:the\s+)?(?:screen\s*sharing|screen share|sharing my screen)\b/i.test(text);
-        if (stopShareCommand && (screenShareRef.current.stream || screenShareRef.current.nativePlugin || screenShareRef.current.timer !== null)) {
+        if (stopShareCommand && (screenShareRef.current.stream || screenShareRef.current.nativePlugin || screenShareRef.current.nativeScreenSharing || screenShareRef.current.timer !== null)) {
           void stopScreenSharing(true);
         }
         jessSpeechAccumulatorRef.current = '';
