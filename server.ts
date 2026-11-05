@@ -404,7 +404,7 @@ async function startServer() {
         }))
         .filter((command: any) =>
           command.targetDeviceId === deviceId &&
-          command.status === 'PENDING' &&
+          ['PENDING', 'CREATED'].includes(String(command.status || '')) &&
           Number(command.expiresAt || 0) > Date.now(),
         )
         .slice(0, 5);
@@ -431,14 +431,14 @@ async function startServer() {
       const deviceId = String(req.body?.deviceId || '').trim();
       const commandId = String(req.body?.commandId || '').trim();
       const statusValue = String(req.body?.status || '').trim().toUpperCase();
-      if (!safeDeviceId(deviceId) || !/^cmd_[a-f0-9]{32}$/.test(commandId)) return res.status(400).json({ error: 'Invalid device or command ID.' });
-      if (!['COMPLETED', 'FAILED'].includes(statusValue)) return res.status(400).json({ error: 'Command result status must be COMPLETED or FAILED.' });
+      if (!safeDeviceId(deviceId) || !safeDeviceId(commandId)) return res.status(400).json({ error: 'Invalid device or command ID.' });
+      if (!['COMPLETED', 'SENT_UNVERIFIED', 'FAILED', 'EXPIRED'].includes(statusValue)) return res.status(400).json({ error: 'Unsupported Android command result status.' });
 
       const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
       if (!raw) return res.status(404).json({ error: 'Command was not found.' });
       const command = decodeFirestoreFields(raw.fields || {});
       if (command.targetDeviceId !== deviceId) return res.status(403).json({ error: 'This command belongs to another device.' });
-      if (!['RUNNING', 'PENDING'].includes(String(command.status || ''))) return res.status(409).json({ error: 'This command is no longer awaiting a result.' });
+      if (!['RUNNING', 'PENDING', 'CREATED'].includes(String(command.status || ''))) return res.status(409).json({ error: 'This command is no longer awaiting a result.' });
 
       const result = req.body?.result && typeof req.body.result === 'object' ? req.body.result : {};
       await patchFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)), {
@@ -464,7 +464,7 @@ async function startServer() {
     try {
       const actor = await verifyAuthenticatedHubMindRequest(req);
       const commandId = String(req.params.commandId || '').trim();
-      if (!/^cmd_[a-f0-9]{32}$/.test(commandId)) return res.status(400).json({ error: 'Invalid command ID.' });
+      if (!safeDeviceId(commandId)) return res.status(400).json({ error: 'Invalid command ID.' });
       const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
       if (!raw) return res.status(404).json({ error: 'Command was not found.' });
       const command = { id: commandId, ...decodeFirestoreFields(raw.fields || {}) };
