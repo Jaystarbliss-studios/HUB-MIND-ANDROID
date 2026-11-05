@@ -92,15 +92,8 @@ class HubMindAgentForegroundService : Service() {
             }
             ACTION_STOP_SCREEN_CAPTURE -> {
                 screenCaptureManager.stopCapture()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    runCatching {
-                        startForeground(
-                            NOTIFICATION_ID,
-                            buildNotification(),
-                            if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-                        )
-                    }
-                }
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(NOTIFICATION_ID, buildNotification())
             }
         }
 
