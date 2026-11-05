@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { LiveAudioClient, JessState } from '../services/liveAudioClient';
@@ -37,6 +37,8 @@ import {
 
 const POSITION_KEY = 'hubmind.jess.position.v2';
 const DESKTOP_TRANSCRIPT_KEY = 'hubmind.jess.desktopTranscript.v1';
+const ACTIVE_DEVICE_TARGET_KEY = 'hubmind.jess.activeTargetDeviceId.v1';
+type JessDeviceTarget = { id: string; name: string; platform: string; status: string; fullControlActive: boolean; isCurrentDevice: boolean; capabilities: string[]; lastSeenAt: number };
 function publishJessTranscript(id: string, speaker: 'user' | 'jess', text: string) {
   try {
     const raw = localStorage.getItem(DESKTOP_TRANSCRIPT_KEY);
@@ -204,6 +206,74 @@ interface JessPetVoiceActivationRequest {
 
 export function JessFloatingAssistant() {
   const { user, profile, updatePreferredName } = useAuth();
+  const [registeredDevices, setRegisteredDevices] = useState<JessDeviceTarget[]>([]);
+  const [activeTargetDeviceId, setActiveTargetDeviceId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch { return ''; }
+  });
+  const activeTargetDeviceRef = useRef(activeTargetDeviceId);
+  useEffect(() => { activeTargetDeviceRef.current = activeTargetDeviceId; }, [activeTargetDeviceId]);
+
+  const persistActiveDeviceTarget = useCallback((deviceId: string) => {
+    setActiveTargetDeviceId(deviceId);
+    activeTargetDeviceRef.current = deviceId;
+    try { localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, deviceId); } catch {}
+    try { (window as any).HubMindNative?.onTargetDeviceSelected?.(deviceId); } catch {}
+    if (profile?.id) {
+      void setDoc(
+        doc(db, 'users', profile.id, 'private', 'jessSettings'),
+        { activeTargetDeviceId: deviceId, activeTargetDeviceUpdatedAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(error => console.warn('[Jess] Could not sync the active device target:', error));
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) { setRegisteredDevices([]); return; }
+    return onSnapshot(collection(db, 'users', profile.id, 'devices'), snapshot => {
+      const nativeBridge = (window as any).HubMindNative;
+      const desktopBridge = (window as any).hubMindDesktop;
+      const localDeviceId = String(
+        nativeBridge?.getAndroidDeviceId?.() ||
+        desktopBridge?.getDeviceId?.() ||
+        ''
+      );
+      const now = Date.now();
+      const devices = snapshot.docs.map(entry => {
+        const data = entry.data() as any;
+        const lastSeenAt = typeof data.lastSeenAt === 'number'
+          ? data.lastSeenAt
+          : Date.parse(String(data.lastSeenAt || '')) || 0;
+        const fresh = lastSeenAt > 0 && now - lastSeenAt < 90_000;
+        return {
+          id: entry.id,
+          name: String(data.deviceName || entry.id),
+          platform: String(data.platform || 'WEB').toUpperCase(),
+          status: data.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : (data.status === 'ONLINE' && fresh ? 'ONLINE' : 'OFFLINE'),
+          fullControlActive: data.fullControlActive === true,
+          isCurrentDevice: entry.id === localDeviceId,
+          capabilities: Array.isArray(data.capabilities) ? data.capabilities.map((item: any) => String(item)) : [],
+          lastSeenAt,
+        } as JessDeviceTarget;
+      }).sort((a,b) => Number(b.isCurrentDevice) - Number(a.isCurrentDevice) || Number(b.status === 'ONLINE') - Number(a.status === 'ONLINE') || a.name.localeCompare(b.name));
+      setRegisteredDevices(devices);
+      const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
+      if (!selectedStillExists) {
+        const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')
+          || devices.find(device => device.status === 'ONLINE');
+        if (next) persistActiveDeviceTarget(next.id);
+      }
+    }, error => console.warn('[Jess] Could not load the shared device registry:', error));
+  }, [profile?.id, persistActiveDeviceTarget]);
+
+  useEffect(() => {
+    const onNativeTargetChanged = () => {
+      let id = '';
+      try { id = localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch {}
+      if (id && id !== activeTargetDeviceRef.current) persistActiveDeviceTarget(id);
+    };
+    window.addEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+    return () => window.removeEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+  }, [persistActiveDeviceTarget]);
   const jessPreferencesRef = useRef({
     permissionMode: 'ask' as 'ask' | 'allow-routine' | 'allow-everything' | 'always-allow',
     fullControlEnabled: false,
@@ -224,6 +294,12 @@ export function JessFloatingAssistant() {
     return onSnapshot(doc(db, 'users', profile.id, 'private', 'jessSettings'), snapshot => {
       const prefs = { ...jessPreferencesRef.current, ...(snapshot.exists() ? snapshot.data() : {}) };
       jessPreferencesRef.current = prefs;
+      if (typeof prefs.activeTargetDeviceId === 'string' && prefs.activeTargetDeviceId !== activeTargetDeviceRef.current) {
+        activeTargetDeviceRef.current = prefs.activeTargetDeviceId;
+        setActiveTargetDeviceId(prefs.activeTargetDeviceId);
+        try { localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, prefs.activeTargetDeviceId); } catch {}
+        try { (window as any).HubMindNative?.onTargetDeviceSelected?.(prefs.activeTargetDeviceId); } catch {}
+      }
       try { localStorage.setItem('hubmind.jess.preferences', JSON.stringify(prefs)); } catch {}
       void (window as any).hubMindDesktop?.setJessPreferences?.(prefs, profile.id).catch(() => {});
     }, error => console.warn('[Jess] Could not load user preferences:', error));
@@ -699,6 +775,14 @@ export function JessFloatingAssistant() {
         let toolArgs = fc.args;
         if (typeof toolArgs === 'string') {
           try { toolArgs = JSON.parse(toolArgs); } catch { toolArgs = {}; }
+        }
+        if (
+          toolArgs && typeof toolArgs === 'object' &&
+          !toolArgs.targetDeviceId &&
+          ['dispatch_android_device_command', 'dispatch_device_command'].includes(fc.name) &&
+          activeTargetDeviceRef.current
+        ) {
+          toolArgs = { ...toolArgs, targetDeviceId: activeTargetDeviceRef.current };
         }
         const fingerprint = `${fc.name}:${JSON.stringify(toolArgs || {})}`;
         const previousCalls = toolLoopRef.current.fingerprints.filter(value => value === fingerprint).length;
@@ -1537,6 +1621,26 @@ export function JessFloatingAssistant() {
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">
+            <label htmlFor="jess-device-target" className="mb-1.5 block text-[11px] font-semibold text-teal-300">Control target device</label>
+            <select
+              id="jess-device-target"
+              value={activeTargetDeviceId}
+              onChange={event => persistActiveDeviceTarget(event.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-teal-400"
+            >
+              <option value="">Choose an available device</option>
+              {registeredDevices.map(device => (
+                <option key={device.id} value={device.id} disabled={device.status !== 'ONLINE'}>
+                  {device.name} · {device.platform} · {device.status === 'ONLINE' ? (device.fullControlActive ? 'Ready' : 'Online') : 'Offline'}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+              Choose your Windows laptop or Android phone. Device actions will be routed to this target when the request does not name one.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">
