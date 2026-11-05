@@ -455,7 +455,7 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'desktop_open_website', description: 'Ask the installed Windows app to open an HTTP or HTTPS URL in the default browser after user confirmation.', parameters: object({ url: { type: 'string' } }, ['url']) },
   {
     name: 'dispatch_android_device_command',
-    description: 'Send one explicit, owner-requested command to a registered Android phone from the installed Hub-Mind Windows desktop app. The Android user must have Hub-Mind open, signed in, and the user-enabled Android Device Agent foreground service running. Use only when the user explicitly asked you to operate their phone in this turn; set userExplicitlyRequested=true only for that direct request. Choose one discrete action at a time. Never automatically resend a command when its status is pending or unconfirmed. A sent/unverified result means the phone accepted the command but has not proved the resulting screen state.',
+    description: 'Send one explicit, owner-requested command to a registered Android phone from an authenticated Hub-Mind client (web workspace, Android workspace or installed Windows desktop app). The Android user must have Hub-Mind open, signed in, and the user-enabled Android Device Agent foreground service running. Use only when the user explicitly asked you to operate their phone in this turn; set userExplicitlyRequested=true only for that direct request. Choose one discrete action at a time. Never automatically resend a command when its status is pending or unconfirmed. A sent/unverified result means the phone accepted the command but has not proved the resulting screen state.',
     parameters: object({
       actionType: { type: 'string', enum: ['TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'] },
       targetDeviceId: { type: 'string', description: 'Optional exact Android device ID from the registered devices list.' },
@@ -3227,11 +3227,6 @@ export async function executeJessTool(
         if (args?.userExplicitlyRequested !== true) {
           return { result: { success: false, error: 'A direct user request is required before operating an Android device.' } };
         }
-        const desktop = (window as any).hubMindDesktop;
-        if (!desktop?.isDesktopApp) {
-          return { result: { success: false, error: 'Android remote control is available from the installed Hub-Mind desktop application, not a normal browser tab.' } };
-        }
-
         const allowedActions = new Set([
           'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT',
           'OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY',
@@ -3296,7 +3291,7 @@ export async function executeJessTool(
         const createdAt = Date.now();
         const commandRef = await addDoc(collection(db, 'users', user.id, 'deviceCommands'), {
           issuingUserId: user.id,
-          sourceDeviceId: 'windows-desktop',
+          sourceDeviceId: (window as any).hubMindDesktop?.isDesktopApp ? 'windows-desktop' : 'hubmind-workspace-client',
           targetDeviceId: target.id,
           actionType,
           parameters,
