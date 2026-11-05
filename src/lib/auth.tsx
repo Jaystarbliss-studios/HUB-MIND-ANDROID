@@ -212,6 +212,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!isBrowser) return;
+    const handleNativeSignOut = () => {
+      void signOut(auth).catch(error => {
+        console.warn('[HubMind] Native sign-out request failed:', error);
+      });
+    };
+    window.addEventListener('hubmind-native-signout', handleNativeSignOut);
+    return () => window.removeEventListener('hubmind-native-signout', handleNativeSignOut);
+  }, []);
+
   // When this workspace is hosted inside the Android app, keep the native
   // device agent authenticated with the same Firebase identity. onIdTokenChanged
   // also fires when Firebase refreshes the ID token, so the foreground service
