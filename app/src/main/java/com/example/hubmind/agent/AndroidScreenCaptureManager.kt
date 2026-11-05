@@ -182,17 +182,17 @@ class AndroidScreenCaptureManager(
 
     private fun stopInternal(stopProjection: Boolean) {
         if (!stopping.compareAndSet(false, true) && mediaProjection == null && virtualDisplay == null) return
-        try { imageReader?.setOnImageAvailableListener(null, null) } catch {}
-        try { virtualDisplay?.release() } catch {}
+        try { imageReader?.setOnImageAvailableListener(null, null) } catch (_: Exception) {}
+        try { virtualDisplay?.release() } catch (_: Exception) {}
         virtualDisplay = null
-        try { imageReader?.close() } catch {}
+        try { imageReader?.close() } catch (_: Exception) {}
         imageReader = null
         val projection = mediaProjection
         mediaProjection = null
         if (stopProjection) {
-            try { projection?.stop() } catch {}
+            try { projection?.stop() } catch (_: Exception) {}
         }
-        try { workerThread?.quitSafely() } catch {}
+        try { workerThread?.quitSafely() } catch (_: Exception) {}
         workerThread = null
         workerHandler = null
         stopping.set(false)
