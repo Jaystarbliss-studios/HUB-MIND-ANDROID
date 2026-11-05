@@ -230,17 +230,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stopTokenListener = onIdTokenChanged(auth, async (firebaseUser) => {
-      const bridge = (window as any).HubMindNative;
-      if (!bridge) return;
+      const nativeBridge = (window as any).HubMindNative;
+      const desktopBridge = (window as any).hubMindDesktop;
       if (!firebaseUser) {
-        try { bridge.onHubMindSignOut?.(); } catch {}
+        try { nativeBridge?.onHubMindSignOut?.(); } catch {}
+        try { await desktopBridge?.clearDeviceSession?.(); } catch {}
         return;
       }
       try {
         const idToken = await firebaseUser.getIdToken(false);
-        bridge.onHubMindAuth?.(firebaseUser.uid, idToken);
+        try { nativeBridge?.onHubMindAuth?.(firebaseUser.uid, idToken); } catch {}
+        try { await desktopBridge?.setDeviceSession?.(firebaseUser.uid, idToken); } catch (error) {
+          console.warn('[HubMind] Desktop device registration sync was unavailable:', error);
+        }
       } catch (error) {
-        console.warn('[HubMind] Native Android session sync was unavailable:', error);
+        console.warn('[HubMind] Device session sync was unavailable:', error);
       }
     });
     return () => stopTokenListener();
