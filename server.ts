@@ -1849,6 +1849,38 @@ async function startServer() {
           parameters: { type: "OBJECT", properties: { tabId: { type: "NUMBER" } } }
         },
         {
+          name: "dispatch_device_command",
+          description: "Perform one explicitly requested action on the selected, registered Hub-Mind Windows laptop or Android phone. The device must be online. Windows requires local Jess Full Control to be active. Never retry uncertain actions automatically.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              actionType: { type: "STRING", enum: [
+                "TAP","DOUBLE_TAP","LONG_PRESS","SWIPE","SCROLL","TYPE_TEXT","CLEAR_TEXT","OPEN_APP","GET_INSTALLED_APPS","GET_SCREEN_HIERARCHY","SET_CLIPBOARD","GET_CLIPBOARD","NAVIGATE_BACK","GO_HOME","OPEN_RECENTS","OPEN_NOTIFICATIONS","OPEN_QUICK_SETTINGS",
+                "list_windows","manage_windows","control_mouse","drag_windows_mouse","type_windows_text","press_windows_keys","control_system_volume","control_screen_brightness","take_windows_screenshot","find_windows_ui_element","list_windows_ui_elements","invoke_windows_ui_element","set_windows_ui_value","read_windows_screen","open_local_windows_path","launch_windows_application","get_windows_time","get_windows_system_info","chrome_bridge_status","chrome_list_tabs","chrome_open_tab","chrome_close_tab","chrome_activate_tab","chrome_navigate_tab","chrome_reload_tab","chrome_read_page","chrome_find_element","chrome_click_element","chrome_fill_field","chrome_scroll","chrome_capture_screenshot","manage_windows_files","manage_windows_clipboard","control_windows_power","scan_windows_storage","clean_windows_storage_candidates","start_windows_auto_scroll","stop_windows_auto_scroll","show_hub_mind_workspace","jess_stop","desktop_run_readonly_command","desktop_open_website"
+              ]},
+              targetDeviceId: { type: "STRING", description: "Optional exact target device ID; otherwise use the selected workspace target." },
+              userExplicitlyRequested: { type: "BOOLEAN", description: "Must be true only for a direct device-action request from the user in this turn." },
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  x:{type:"NUMBER"}, y:{type:"NUMBER"}, startX:{type:"NUMBER"}, startY:{type:"NUMBER"}, endX:{type:"NUMBER"}, endY:{type:"NUMBER"},
+                  text:{type:"STRING"}, appName:{type:"STRING"}, packageName:{type:"STRING"}, action:{type:"STRING"}, value:{type:"STRING"},
+                  durationMs:{type:"NUMBER"}, title:{type:"STRING"}, handle:{type:"STRING"}, width:{type:"NUMBER"}, height:{type:"NUMBER"},
+                  position:{type:"STRING"}, monitorId:{type:"STRING"}, delta:{type:"NUMBER"}, keys:{type:"STRING"}, name:{type:"STRING"},
+                  index:{type:"NUMBER"}, expectedName:{type:"STRING"}, path:{type:"STRING"}, destination:{type:"STRING"}, content:{type:"STRING"},
+                  pattern:{type:"STRING"}, offset:{type:"NUMBER"}, limit:{type:"NUMBER"}, root:{type:"STRING"},
+                  largeThresholdMB:{type:"NUMBER"}, inactiveDays:{type:"NUMBER"}, maxSeconds:{type:"NUMBER"}, maxFiles:{type:"NUMBER"},
+                  detectDuplicates:{type:"BOOLEAN"}, scanId:{type:"STRING"}, candidateIds:{type:"ARRAY",items:{type:"STRING"}},
+                  monitorName:{type:"STRING"}, detail:{type:"STRING"}, url:{type:"STRING"}, selector:{type:"STRING"},
+                  deltaY:{type:"NUMBER"}, deltaX:{type:"NUMBER"}, direction:{type:"STRING",enum:["up","down"]},
+                  speed:{type:"NUMBER"}, commandName:{type:"STRING",enum:["ipconfig","systemInfo","runningProcesses"]}
+                }
+              }
+            },
+            required: ["actionType","userExplicitlyRequested"]
+          }
+        },
+        {
           name: "end_session",
           description: "Put the AI assistant to sleep and end the live voice session when the user says 'end this session', 'go to sleep', 'sleep', or 'deactivate'.",
           parameters: { type: "OBJECT", properties: { reason: { type: "STRING" } } }
