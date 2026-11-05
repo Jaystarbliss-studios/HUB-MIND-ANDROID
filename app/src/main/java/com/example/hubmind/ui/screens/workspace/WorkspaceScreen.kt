@@ -316,7 +316,7 @@ fun WorkspaceScreen(
 
         if (pageProgress in 1..99) {
             LinearProgressIndicator(
-                progress = { pageProgress / 100f },
+                progress = pageProgress / 100f,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 1.dp),
