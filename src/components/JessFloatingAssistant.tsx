@@ -543,6 +543,8 @@ export function JessFloatingAssistant() {
         share.nativeScreenSharing = false;
         setScreenSharingActive(false);
         setSpeechState({ text: String(detail.error || 'Android screen sharing could not start.'), speaker: 'jess', visible: true });
+      } else if (detail.type === 'microphone-error') {
+        setSpeechState({ text: String(detail.error || 'Android could not keep Jess voice active in the background.'), speaker: 'jess', visible: true });
       }
     };
     window.addEventListener('hubmind-native-screen-share', handleNativeScreenShare as EventListener);
@@ -1037,6 +1039,19 @@ export function JessFloatingAssistant() {
           };
           result.result.verified = delivered && result.result.verified === true;
           result.result.success = delivered;
+        }
+
+        if (fc.name === 'dispatch_device_command' && typeof result.result?.imageDataUrl === 'string') {
+          const delivered = clientRef.current?.sendScreenFrame(result.result.imageDataUrl) === true;
+          result.result.screenshotDeliveredToJess = delivered;
+          if (!delivered) {
+            result.result.message = String(result.result.message || 'The remote device captured a screenshot.') +
+              ' The screenshot was not delivered to the current Jess Live session.';
+          } else {
+            result.result.message = String(result.result.message || 'The remote device captured a screenshot.') +
+              ' The captured image was sent to Jess for visual analysis.';
+          }
+          delete result.result.imageDataUrl;
         }
 
         clientRef.current?.sendFunctionResponse({ name: fc.name, id: fc.id, response: result.result });
