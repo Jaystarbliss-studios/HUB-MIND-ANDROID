@@ -17,7 +17,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -186,8 +185,6 @@ fun SettingsScreen(
                             )
                         }
                     }
-
-                    Divider(color = Slate800, thickness = 1.dp)
 
                     Divider(color = Slate800, thickness = 1.dp)
 
