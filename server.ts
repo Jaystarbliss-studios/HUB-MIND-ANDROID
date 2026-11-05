@@ -11,6 +11,7 @@ import { getJessToolsForRuntime } from "./src/shared/jessNativeToolNames.ts";
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { createHash } from "node:crypto";
 import { createServer as createViteServer, createLogger } from "vite";
 import OpenAI from "openai";
 import { WebSocketServer } from "ws";
@@ -197,6 +198,7 @@ async function startServer() {
 
 
   const liveTokenRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const liveIdentityCache = new Map<string, { uid: string; expiresAt: number }>();
   app.post(["/api/live-token", "/live-token"], async (req, res) => {
     const clientKey = String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 160);
     const now = Date.now();
@@ -218,16 +220,31 @@ async function startServer() {
       const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
       if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
 
-      // Ask Firebase Auth to validate the ID token. Never trust a bearer token
-      // merely because the client supplied it.
-      const identityResponse = await fetch(
-        "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
-      );
-      if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
-      const identityData = await identityResponse.json() as any;
-      const verifiedUser = identityData?.users?.[0];
-      if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+      // Firebase Identity Toolkit validation is cached briefly by a one-way
+      // token fingerprint. This saves a network round-trip during rapid retries
+      // without storing the bearer token or trusting it beyond a short window.
+      const tokenFingerprint = createHash("sha256").update(idToken).digest("hex");
+      const cachedIdentity = liveIdentityCache.get(tokenFingerprint);
+      let verifiedUserId = cachedIdentity && cachedIdentity.expiresAt > now
+        ? cachedIdentity.uid
+        : "";
+
+      if (!verifiedUserId) {
+        const identityResponse = await fetch(
+          "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
+        );
+        if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
+        const identityData = await identityResponse.json() as any;
+        const verifiedUser = identityData?.users?.[0];
+        if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+        verifiedUserId = String(verifiedUser.localId);
+        liveIdentityCache.set(tokenFingerprint, { uid: verifiedUserId, expiresAt: now + 15_000 });
+      }
+
+      if (liveIdentityCache.size > 5000) {
+        for (const [key, value] of liveIdentityCache) if (value.expiresAt <= now) liveIdentityCache.delete(key);
+      }
 
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured on the server." });
@@ -239,6 +256,7 @@ async function startServer() {
           uses: 1,
           expireTime: new Date(now + 30 * 60 * 1000).toISOString(),
           newSessionExpireTime: new Date(now + 60 * 1000).toISOString(),
+          liveConnectConstraints: { model: "models/gemini-3.8-live" },
         }),
         signal: AbortSignal.timeout(12_000),
       });
@@ -247,7 +265,7 @@ async function startServer() {
         console.error("Live ephemeral-token provisioning failed:", tokenData?.error?.message || tokenResponse.status);
         return res.status(502).json({ error: "Gemini Live token provisioning failed. Please try again shortly." });
       }
-      return res.json({ token: tokenData.name, userId: verifiedUser.localId, expiresAt: tokenData.expireTime || null });
+      return res.json({ token: tokenData.name, userId: verifiedUserId, expiresAt: tokenData.expireTime || null });
     } catch (error: any) {
       console.error("Jess live-token error:", error?.message || error);
       return res.status(500).json({ error: "Could not initialize Jess Live. Please try again." });
