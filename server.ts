@@ -11,10 +11,10 @@ import { getJessToolsForRuntime } from "./src/shared/jessNativeToolNames.ts";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createHash } from "node:crypto";
 import { createServer as createViteServer, createLogger } from "vite";
 import OpenAI from "openai";
 import { WebSocketServer } from "ws";
+import { randomUUID } from "node:crypto";
 import { firebaseAdminRequest, firestoreDocumentUrl, firebaseAuthAdminUrl, decodeFirestoreFields, encodeFirestoreFields } from "./src/server/firebaseAdminRest.ts";
 import { getFullRepositoryStatus, fetchHubMindReleases, fetchHubMindCommits, inspectCodebase } from "./src/server/githubService.ts";
 import { performGlobalWebSearch } from "./src/server/webSearchService.ts";
@@ -124,6 +124,51 @@ async function startServer() {
     }
     return { uid: identity.localId, email, profile };
   };
+  const verifyAuthenticatedHubMindRequest = async (req: any) => {
+    const authHeader = String(req.headers.authorization || '');
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (!idToken || idToken.length > 10000) {
+      const error: any = new Error('Sign in to Hub-Mind before using device controls.');
+      error.status = 401;
+      throw error;
+    }
+
+    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+    if (!apiKey) {
+      const error: any = new Error('Firebase token verification is not configured on this server.');
+      error.status = 503;
+      throw error;
+    }
+
+    const response = await fetch(
+      'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    const data: any = await response.json().catch(() => ({}));
+    const identity = data?.users?.[0];
+    if (!response.ok || !identity?.localId || identity.disabled) {
+      const error: any = new Error('Your Hub-Mind sign-in session is invalid or expired.');
+      error.status = 401;
+      throw error;
+    }
+
+    const profileResponse: any = await firebaseAdminRequest(
+      firestoreDocumentUrl('users/' + encodeURIComponent(identity.localId)),
+    );
+    const profile = decodeFirestoreFields(profileResponse?.fields || {});
+    if (profile?.status !== 'active' || !['admin', 'staff'].includes(String(profile?.role || ''))) {
+      const error: any = new Error('Your Hub-Mind account is not active for device control.');
+      error.status = 403;
+      throw error;
+    }
+    return { uid: identity.localId, email: String(identity.email || '').trim().toLowerCase(), profile };
+  };
+
   const listAdminUserProfiles = async () => {
     const data: any = await firebaseAdminRequest(firestoreDocumentUrl('users?pageSize=1000'));
     return (data?.documents || []).map((entry: any) => ({ id: String(entry.name || '').split('/').pop() || '', ...decodeFirestoreFields(entry.fields || {}) }));
@@ -197,8 +242,241 @@ async function startServer() {
   });
 
 
+  // Authenticated cross-device command plane. Device records and commands are scoped
+  // to the verified Firebase uid; clients can never address another user's device paths.
+  const androidActionTypes = new Set([
+    'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'CLEAR_TEXT',
+    'OPEN_APP', 'GET_INSTALLED_APPS', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN',
+    'SET_CLIPBOARD', 'GET_CLIPBOARD', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS',
+    'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS',
+  ]);
+  const safeDeviceId = (value: unknown) => /^[A-Za-z0-9_-]{6,128}$/.test(String(value || ''));
+  const userDevicePath = (uid: string, suffix = '') =>
+    'users/' + encodeURIComponent(uid) + '/devices' + suffix;
+  const userCommandPath = (uid: string, suffix = '') =>
+    'users/' + encodeURIComponent(uid) + '/deviceCommands' + suffix;
+  const readFirestoreDoc = async (path: string) => {
+    try {
+      return await firebaseAdminRequest(firestoreDocumentUrl(path));
+    } catch (error: any) {
+      if (Number(error?.status) === 404) return null;
+      throw error;
+    }
+  };
+  const patchFirestoreDoc = async (path: string, values: Record<string, any>) => {
+    const params = new URLSearchParams();
+    Object.keys(values).forEach(key => params.append('updateMask.fieldPaths', key));
+    return firebaseAdminRequest(firestoreDocumentUrl(path) + '?' + params.toString(), {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: encodeFirestoreFields(values) }),
+    });
+  };
+  const createFirestoreDoc = async (collectionPath: string, documentId: string, values: Record<string, any>) => {
+    return firebaseAdminRequest(
+      firestoreDocumentUrl(collectionPath) + '?documentId=' + encodeURIComponent(documentId),
+      { method: 'POST', body: JSON.stringify({ fields: encodeFirestoreFields(values) }) },
+    );
+  };
+  const getDeviceRecord = async (uid: string, deviceId: string) => {
+    const raw: any = await readFirestoreDoc(userDevicePath(uid, '/' + encodeURIComponent(deviceId)));
+    return raw ? { id: deviceId, ...decodeFirestoreFields(raw.fields || {}) } : null;
+  };
+
+  app.get('/api/devices', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const result: any = await firebaseAdminRequest(
+        firestoreDocumentUrl(userDevicePath(actor.uid) + '?pageSize=100'),
+      );
+      const devices = (result?.documents || []).map((entry: any) => ({
+        id: String(entry.name || '').split('/').pop() || '',
+        ...decodeFirestoreFields(entry.fields || {}),
+      }));
+      return res.json({ success: true, devices });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Could not list devices:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not load registered devices.' : (error?.message || 'Device list failed.') });
+    }
+  });
+
+  app.post('/api/devices/register', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid device ID.' });
+
+      const deviceName = String(req.body?.deviceName || 'Android device').trim().slice(0, 120) || 'Android device';
+      const capabilities = Array.isArray(req.body?.capabilities)
+        ? req.body.capabilities.map((item: unknown) => String(item).slice(0, 80)).slice(0, 40)
+        : [];
+      const now = new Date().toISOString();
+      const values = {
+        deviceId,
+        deviceName,
+        platform: 'ANDROID',
+        status: 'ONLINE',
+        capabilities,
+        clientVersion: String(req.body?.clientVersion || 'unknown').slice(0, 40),
+        lastSeenAt: now,
+        registeredAt: String(req.body?.registeredAt || now).slice(0, 40),
+        fullControlActive: req.body?.fullControlActive === true,
+      };
+
+      const path = userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId));
+      const existing = await readFirestoreDoc(path);
+      if (existing) {
+        await patchFirestoreDoc(path, values);
+      } else {
+        await createFirestoreDoc(userDevicePath(actor.uid), deviceId, values);
+      }
+      return res.json({ success: true, device: values });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Device registration failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not register this Android device.' : (error?.message || 'Device registration failed.') });
+    }
+  });
+
+  app.post('/api/devices/dispatch', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const targetDeviceId = String(req.body?.targetDeviceId || '').trim();
+      const actionType = String(req.body?.actionType || '').trim().toUpperCase();
+      const parameters = req.body?.parameters && typeof req.body.parameters === 'object' && !Array.isArray(req.body.parameters)
+        ? req.body.parameters
+        : {};
+      if (!safeDeviceId(targetDeviceId)) return res.status(400).json({ error: 'Choose a registered Android device.' });
+      if (!androidActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Android device action.' });
+      if (JSON.stringify(parameters).length > 20000) return res.status(413).json({ error: 'Android action parameters are too large.' });
+
+      const device = await getDeviceRecord(actor.uid, targetDeviceId);
+      if (!device || device.platform !== 'ANDROID') return res.status(404).json({ error: 'That Android device is not registered to this Hub-Mind account.' });
+      if (device.status !== 'ONLINE') return res.status(409).json({ error: 'The Android device is offline. Open Hub-Mind on the phone and enable its Active Device Control Session.' });
+
+      const now = Date.now();
+      const commandId = 'cmd_' + randomUUID().replace(/-/g, '');
+      const command = {
+        commandId,
+        issuingUserId: actor.uid,
+        sourceDeviceId: String(req.body?.sourceDeviceId || 'hubmind-desktop').slice(0, 128),
+        targetDeviceId,
+        actionType,
+        parameters,
+        status: 'PENDING',
+        requiresConfirmation: req.body?.requiresConfirmation === true,
+        createdAt: new Date(now).toISOString(),
+        expiresAt: now + 90000,
+      };
+      await createFirestoreDoc(userCommandPath(actor.uid), commandId, command);
+      return res.status(202).json({ success: true, commandId, status: 'PENDING', expiresAt: command.expiresAt });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command dispatch failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not dispatch the Android device command.' : (error?.message || 'Device command dispatch failed.') });
+    }
+  });
+
+  app.post('/api/devices/poll', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid Android device ID.' });
+      const device = await getDeviceRecord(actor.uid, deviceId);
+      if (!device || device.platform !== 'ANDROID') return res.status(404).json({ error: 'This Android device is not registered.' });
+
+      await patchFirestoreDoc(userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId)), {
+        status: 'ONLINE',
+        lastSeenAt: new Date().toISOString(),
+      });
+
+      let result: any = null;
+      try {
+        result = await firebaseAdminRequest(firestoreDocumentUrl(userCommandPath(actor.uid) + '?pageSize=100'));
+      } catch (error: any) {
+        if (Number(error?.status) !== 404) throw error;
+      }
+
+      const candidates = (result?.documents || [])
+        .map((entry: any) => ({
+          id: String(entry.name || '').split('/').pop() || '',
+          ...decodeFirestoreFields(entry.fields || {}),
+        }))
+        .filter((command: any) =>
+          command.targetDeviceId === deviceId &&
+          command.status === 'PENDING' &&
+          Number(command.expiresAt || 0) > Date.now(),
+        )
+        .slice(0, 5);
+
+      const commands = [];
+      for (const command of candidates) {
+        await patchFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(command.id)), {
+          status: 'RUNNING',
+          claimedAt: new Date().toISOString(),
+        });
+        commands.push(command);
+      }
+      return res.json({ success: true, commands });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command polling failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not poll Android device commands.' : (error?.message || 'Device polling failed.') });
+    }
+  });
+
+  app.post('/api/devices/result', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      const commandId = String(req.body?.commandId || '').trim();
+      const statusValue = String(req.body?.status || '').trim().toUpperCase();
+      if (!safeDeviceId(deviceId) || !/^cmd_[a-f0-9]{32}$/.test(commandId)) return res.status(400).json({ error: 'Invalid device or command ID.' });
+      if (!['COMPLETED', 'FAILED'].includes(statusValue)) return res.status(400).json({ error: 'Command result status must be COMPLETED or FAILED.' });
+
+      const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
+      if (!raw) return res.status(404).json({ error: 'Command was not found.' });
+      const command = decodeFirestoreFields(raw.fields || {});
+      if (command.targetDeviceId !== deviceId) return res.status(403).json({ error: 'This command belongs to another device.' });
+      if (!['RUNNING', 'PENDING'].includes(String(command.status || ''))) return res.status(409).json({ error: 'This command is no longer awaiting a result.' });
+
+      const result = req.body?.result && typeof req.body.result === 'object' ? req.body.result : {};
+      await patchFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)), {
+        status: statusValue,
+        result: {
+          success: result.success === true,
+          verified: result.verified === true,
+          outputText: String(result.outputText || '').slice(0, 4000),
+          error: String(result.error || '').slice(0, 1000),
+          durationMs: Math.max(0, Math.min(Number(result.durationMs) || 0, 120000)),
+        },
+        completedAt: new Date().toISOString(),
+      });
+      return res.json({ success: true, commandId, status: statusValue });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command result write failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not save the Android command result.' : (error?.message || 'Command result failed.') });
+    }
+  });
+
+  app.get('/api/devices/commands/:commandId', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const commandId = String(req.params.commandId || '').trim();
+      if (!/^cmd_[a-f0-9]{32}$/.test(commandId)) return res.status(400).json({ error: 'Invalid command ID.' });
+      const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
+      if (!raw) return res.status(404).json({ error: 'Command was not found.' });
+      const command = { id: commandId, ...decodeFirestoreFields(raw.fields || {}) };
+      return res.json({ success: true, command });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command status lookup failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not read Android command status.' : (error?.message || 'Command status lookup failed.') });
+    }
+  });
+
   const liveTokenRateLimits = new Map<string, { count: number; resetAt: number }>();
-  const liveIdentityCache = new Map<string, { uid: string; expiresAt: number }>();
   app.post(["/api/live-token", "/live-token"], async (req, res) => {
     const clientKey = String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 160);
     const now = Date.now();
@@ -220,31 +498,16 @@ async function startServer() {
       const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
       if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
 
-      // Firebase Identity Toolkit validation is cached briefly by a one-way
-      // token fingerprint. This saves a network round-trip during rapid retries
-      // without storing the bearer token or trusting it beyond a short window.
-      const tokenFingerprint = createHash("sha256").update(idToken).digest("hex");
-      const cachedIdentity = liveIdentityCache.get(tokenFingerprint);
-      let verifiedUserId = cachedIdentity && cachedIdentity.expiresAt > now
-        ? cachedIdentity.uid
-        : "";
-
-      if (!verifiedUserId) {
-        const identityResponse = await fetch(
-          "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
-        );
-        if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
-        const identityData = await identityResponse.json() as any;
-        const verifiedUser = identityData?.users?.[0];
-        if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
-        verifiedUserId = String(verifiedUser.localId);
-        liveIdentityCache.set(tokenFingerprint, { uid: verifiedUserId, expiresAt: now + 15_000 });
-      }
-
-      if (liveIdentityCache.size > 5000) {
-        for (const [key, value] of liveIdentityCache) if (value.expiresAt <= now) liveIdentityCache.delete(key);
-      }
+      // Ask Firebase Auth to validate the ID token. Never trust a bearer token
+      // merely because the client supplied it.
+      const identityResponse = await fetch(
+        "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
+      );
+      if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
+      const identityData = await identityResponse.json() as any;
+      const verifiedUser = identityData?.users?.[0];
+      if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
 
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured on the server." });
@@ -256,7 +519,6 @@ async function startServer() {
           uses: 1,
           expireTime: new Date(now + 30 * 60 * 1000).toISOString(),
           newSessionExpireTime: new Date(now + 60 * 1000).toISOString(),
-          liveConnectConstraints: { model: "models/gemini-3.8-live" },
         }),
         signal: AbortSignal.timeout(12_000),
       });
@@ -265,7 +527,7 @@ async function startServer() {
         console.error("Live ephemeral-token provisioning failed:", tokenData?.error?.message || tokenResponse.status);
         return res.status(502).json({ error: "Gemini Live token provisioning failed. Please try again shortly." });
       }
-      return res.json({ token: tokenData.name, userId: verifiedUserId, expiresAt: tokenData.expireTime || null });
+      return res.json({ token: tokenData.name, userId: verifiedUser.localId, expiresAt: tokenData.expireTime || null });
     } catch (error: any) {
       console.error("Jess live-token error:", error?.message || error);
       return res.status(500).json({ error: "Could not initialize Jess Live. Please try again." });
