@@ -14,7 +14,7 @@ import fs from "fs";
 import { createServer as createViteServer, createLogger } from "vite";
 import OpenAI from "openai";
 import { WebSocketServer } from "ws";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { firebaseAdminRequest, firestoreDocumentUrl, firebaseAuthAdminUrl, decodeFirestoreFields, encodeFirestoreFields } from "./src/server/firebaseAdminRest.ts";
 import { getFullRepositoryStatus, fetchHubMindReleases, fetchHubMindCommits, inspectCodebase } from "./src/server/githubService.ts";
 import { performGlobalWebSearch } from "./src/server/webSearchService.ts";
@@ -124,6 +124,7 @@ async function startServer() {
     }
     return { uid: identity.localId, email, profile };
   };
+  const authenticatedDeviceSessionCache = new Map<string, { uid: string; email: string; profile: any; expiresAt: number }>();
   const verifyAuthenticatedHubMindRequest = async (req: any) => {
     const authHeader = String(req.headers.authorization || '');
     const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -131,6 +132,12 @@ async function startServer() {
       const error: any = new Error('Sign in to Hub-Mind before using device controls.');
       error.status = 401;
       throw error;
+    }
+
+    const cacheKey = createHash('sha256').update(idToken).digest('hex');
+    const cachedSession = authenticatedDeviceSessionCache.get(cacheKey);
+    if (cachedSession && cachedSession.expiresAt > Date.now()) {
+      return { uid: cachedSession.uid, email: cachedSession.email, profile: cachedSession.profile };
     }
 
     const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
@@ -166,7 +173,19 @@ async function startServer() {
       error.status = 403;
       throw error;
     }
-    return { uid: identity.localId, email: String(identity.email || '').trim().toLowerCase(), profile };
+    const verifiedSession = {
+      uid: identity.localId,
+      email: String(identity.email || '').trim().toLowerCase(),
+      profile,
+      expiresAt: Date.now() + 30_000,
+    };
+    authenticatedDeviceSessionCache.set(cacheKey, verifiedSession);
+    if (authenticatedDeviceSessionCache.size > 5000) {
+      for (const [key, value] of authenticatedDeviceSessionCache) {
+        if (value.expiresAt <= Date.now()) authenticatedDeviceSessionCache.delete(key);
+      }
+    }
+    return { uid: verifiedSession.uid, email: verifiedSession.email, profile: verifiedSession.profile };
   };
 
   const listAdminUserProfiles = async () => {
