@@ -8,6 +8,7 @@ const read = path => readFile(fileURLToPath(new URL(path, import.meta.url)), 'ut
 test('Windows transcript overlay is transparent and forwards all pointer input to the underlying app', async () => {
   const main = await read('../../electron/main.cjs');
   const css = await read('../../src/pages/jess-transcript-overlay.css');
+  const globalCss = await read('../../src/index.css');
   const createStart = main.indexOf('function createTranscriptOverlayWindow');
   const createEnd = main.indexOf('\nfunction ', createStart + 10);
   assert.ok(createStart >= 0 && createEnd > createStart);
@@ -20,6 +21,8 @@ test('Windows transcript overlay is transparent and forwards all pointer input t
   assert.match(css, /background:\s*transparent\s*!important/);
   assert.match(css, /backdrop-filter:\s*none/);
   assert.match(css, /pointer-events:\s*none/);
+  assert.match(globalCss, /html:root:has\(\.jess-transcript-overlay-page\)[\s\S]*?background:\s*transparent\s*!important/);
+  assert.match(globalCss, /body:has\(\.jess-transcript-overlay-page\)[\s\S]*?#root:has\(\.jess-transcript-overlay-page\)/);
 });
 
 test('Windows desktop registers and polls as a shared device while commands stay gated by local Full Control', async () => {
