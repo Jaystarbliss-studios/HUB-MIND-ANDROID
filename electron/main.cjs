@@ -150,7 +150,7 @@ function summarizeRemoteNativeResult(result) {
 async function confirmRemoteDesktopAction(actionType, args = {}) {
   const warningActions = new Set([
     'close_window', 'control_windows_power', 'manage_windows_files',
-    'clean_windows_storage_candidates', 'run_windows_command_native',
+    'clean_windows_storage_candidates', 'run_windows_command_native', 'desktop_open_website',
   ]);
   const fileAction = String(args?.action || '').toLowerCase();
   const needsFileConfirmation = actionType === 'manage_windows_files'
@@ -276,6 +276,51 @@ async function executeRemoteWindowsCommand(command, userId) {
     case 'get_windows_system_info':
       result = await native('system_info', {});
       break;
+    case 'start_windows_auto_scroll': {
+      const direction = args.direction === 'up' ? 'up' : 'down';
+      const speed = Number(args.speed ?? 4);
+      if (!Number.isFinite(speed) || speed < 1 || speed > 15) throw new Error('Auto-scroll speed must be from 1 to 15.');
+      const started = await startAutoScroll({ direction, speed });
+      result = { ok: started?.ok === true, verified: false, evidence: { message: started?.active ? 'Windows system-wide auto-scroll is active.' : 'Windows auto-scroll did not start.' } };
+      break;
+    }
+    case 'stop_windows_auto_scroll': {
+      const stopped = stopAutoScroll('remote-user-stop');
+      result = { ok: stopped?.ok === true, verified: true, evidence: { message: 'Windows auto-scroll stopped.' } };
+      break;
+    }
+    case 'show_hub_mind_workspace': {
+      const shown = await showWorkspaceVerified();
+      result = { ok: shown === true, verified: shown === true, evidence: { message: shown ? 'Hub-Mind workspace is visible on the Windows laptop.' : 'Hub-Mind workspace could not be brought into view.' } };
+      break;
+    }
+    case 'jess_stop': {
+      const stopped = stopFullControl('remote-device-stop');
+      result = { ok: stopped?.ok === true, verified: stopped?.active === false, evidence: { message: 'Jess Full Control stopped on the Windows laptop.' } };
+      break;
+    }
+    case 'desktop_run_readonly_command': {
+      const commandName = String(args.commandName || '');
+      const command = READ_ONLY_COMMANDS[commandName];
+      if (!command) throw new Error('That Windows diagnostic is not on the approved read-only list.');
+      const output = await new Promise((resolve, reject) => {
+        execFile(command[0], command[1], {
+          windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024, shell: false,
+        }, (error, stdout, stderr) => {
+          if (error && !stdout) return reject(new Error(String(stderr || error.message).slice(0, 1000)));
+          resolve(String(stdout || stderr || '').slice(0, 12000));
+        });
+      });
+      result = { ok: true, verified: false, evidence: { text: String(output) } };
+      break;
+    }
+    case 'desktop_open_website': {
+      const url = new URL(String(args.url || ''));
+      if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Only HTTP and HTTPS websites can be opened.');
+      await shell.openExternal(url.toString());
+      result = { ok: true, verified: false, evidence: { message: 'Asked Windows to open ' + url.origin + ' in the default browser.' } };
+      break;
+    }
     case 'chrome_bridge_status':
       return { success: true, verified: true, outputText: JSON.stringify(chromeBridge.status()), error: '' };
     default:
@@ -299,7 +344,7 @@ async function reportDesktopCommand(session, commandId, status, result) {
       outputText: String(result?.outputText || '').slice(0, 3900),
       error: String(result?.error || '').slice(0, 900),
       durationMs: Math.max(0, Number(result?.durationMs) || 0),
-      imageDataUrl: typeof result?.imageDataUrl === 'string' && result.imageDataUrl.length <= 900000 ? result.imageDataUrl : undefined,
+      imageDataUrl: typeof result?.imageDataUrl === 'string' && result.imageDataUrl.length <= 650000 ? result.imageDataUrl : undefined,
     },
   });
 }
