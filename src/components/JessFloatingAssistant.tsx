@@ -232,36 +232,38 @@ export function JessFloatingAssistant() {
     return onSnapshot(collection(db, 'users', profile.id, 'devices'), snapshot => {
       const nativeBridge = (window as any).HubMindNative;
       const desktopBridge = (window as any).hubMindDesktop;
-      const localDeviceId = String(
-        nativeBridge?.getAndroidDeviceId?.() ||
-        desktopBridge?.getDeviceId?.() ||
-        ''
-      );
-      const now = Date.now();
-      const devices = snapshot.docs.map(entry => {
-        const data = entry.data() as any;
-        const lastSeenAt = typeof data.lastSeenAt === 'number'
-          ? data.lastSeenAt
-          : Date.parse(String(data.lastSeenAt || '')) || 0;
-        const fresh = lastSeenAt > 0 && now - lastSeenAt < 90_000;
-        return {
-          id: entry.id,
-          name: String(data.deviceName || entry.id),
-          platform: String(data.platform || 'WEB').toUpperCase(),
-          status: data.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : (data.status === 'ONLINE' && fresh ? 'ONLINE' : 'OFFLINE'),
-          fullControlActive: data.fullControlActive === true,
-          isCurrentDevice: entry.id === localDeviceId,
-          capabilities: Array.isArray(data.capabilities) ? data.capabilities.map((item: any) => String(item)) : [],
-          lastSeenAt,
-        } as JessDeviceTarget;
-      }).sort((a,b) => Number(b.isCurrentDevice) - Number(a.isCurrentDevice) || Number(b.status === 'ONLINE') - Number(a.status === 'ONLINE') || a.name.localeCompare(b.name));
-      setRegisteredDevices(devices);
-      const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
-      if (!selectedStillExists) {
-        const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')
-          || devices.find(device => device.status === 'ONLINE');
-        if (next) persistActiveDeviceTarget(next.id);
-      }
+      const nativeId = String(nativeBridge?.getAndroidDeviceId?.() || '');
+      const desktopIdPromise = nativeId || typeof desktopBridge?.getDeviceId !== 'function'
+        ? Promise.resolve('')
+        : Promise.resolve(desktopBridge.getDeviceId()).then((value: unknown) => String(value || '')).catch(() => '');
+      void desktopIdPromise.then(desktopId => {
+        const localDeviceId = nativeId || desktopId;
+        const now = Date.now();
+        const devices = snapshot.docs.map(entry => {
+          const data = entry.data() as any;
+          const lastSeenAt = typeof data.lastSeenAt === 'number'
+            ? data.lastSeenAt
+            : Date.parse(String(data.lastSeenAt || '')) || 0;
+          const fresh = lastSeenAt > 0 && now - lastSeenAt < 90_000;
+          return {
+            id: entry.id,
+            name: String(data.deviceName || entry.id),
+            platform: String(data.platform || 'WEB').toUpperCase(),
+            status: data.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : (data.status === 'ONLINE' && fresh ? 'ONLINE' : 'OFFLINE'),
+            fullControlActive: data.fullControlActive === true,
+            isCurrentDevice: entry.id === localDeviceId,
+            capabilities: Array.isArray(data.capabilities) ? data.capabilities.map((item: any) => String(item)) : [],
+            lastSeenAt,
+          } as JessDeviceTarget;
+        }).sort((a,b) => Number(b.isCurrentDevice) - Number(a.isCurrentDevice) || Number(b.status === 'ONLINE') - Number(a.status === 'ONLINE') || a.name.localeCompare(b.name));
+        setRegisteredDevices(devices);
+        const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
+        if (!selectedStillExists) {
+          const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')
+            || devices.find(device => device.status === 'ONLINE');
+          if (next) persistActiveDeviceTarget(next.id);
+        }
+      });
     }, error => console.warn('[Jess] Could not load the shared device registry:', error));
   }, [profile?.id, persistActiveDeviceTarget]);
 
