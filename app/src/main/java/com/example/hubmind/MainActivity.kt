@@ -117,6 +117,9 @@ class MainActivity : ComponentActivity() {
                         },
                         stopScreenCapture = {
                             HubMindAgentForegroundService.stopScreenCapture(context)
+                        },
+                        setJessMicrophoneActive = { active ->
+                            HubMindAgentForegroundService.setJessMicrophoneActive(context, active)
                         }
                     )
                 }
