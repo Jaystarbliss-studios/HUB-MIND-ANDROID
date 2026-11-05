@@ -40,15 +40,17 @@ const DESKTOP_TRANSCRIPT_KEY = 'hubmind.jess.desktopTranscript.v1';
 const ACTIVE_DEVICE_TARGET_KEY = 'hubmind.jess.activeTargetDeviceId.v1';
 type JessDeviceTarget = { id: string; name: string; platform: string; status: string; fullControlActive: boolean; isCurrentDevice: boolean; capabilities: string[]; lastSeenAt: number };
 function publishJessTranscript(id: string, speaker: 'user' | 'jess', text: string) {
+  const entry = { id, speaker, text: String(text).slice(0, 12000), at: Date.now() };
+  // Native Android transcript is independent of browser storage, so it still
+  // receives captions when WebView localStorage is unavailable or quota-limited.
+  try { (window as any).HubMindNative?.onJessTranscript?.(speaker, entry.text); } catch {}
   try {
     const raw = localStorage.getItem(DESKTOP_TRANSCRIPT_KEY);
     const existing = raw ? JSON.parse(raw) : [];
     const entries = Array.isArray(existing) ? existing.filter((item: any) => item && typeof item.id === 'string') : [];
     const index = entries.findIndex((item: any) => item.id === id);
-    const entry = { id, speaker, text: String(text).slice(0, 12000), at: Date.now() };
     if (index >= 0) entries[index] = entry; else entries.push(entry);
     localStorage.setItem(DESKTOP_TRANSCRIPT_KEY, JSON.stringify(entries.slice(-40)));
-    try { (window as any).HubMindNative?.onJessTranscript?.(speaker, entry.text); } catch {}
   } catch { /* Transcript persistence must never interrupt the live voice session. */ }
 }
 const DEFAULT_POSITION = { x: 0.92, y: 0.88 };
@@ -290,6 +292,7 @@ export function JessFloatingAssistant() {
     allowShellCommands: true,
     moodAdaptiveTone: true,
     conversationStyle: 'adaptive' as 'adaptive' | 'friendly' | 'professional' | 'concise',
+    activeTargetDeviceId: '',
   });
   useEffect(() => {
     if (!profile?.id) return;
@@ -649,6 +652,10 @@ export function JessFloatingAssistant() {
       share.nativeListener = null;
       if (share.nativePlugin?.stopSharing) void share.nativePlugin.stopSharing().catch(() => undefined);
       share.nativePlugin = null;
+      if (share.nativeScreenSharing) {
+        try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+        share.nativeScreenSharing = false;
+      }
       void clientRef.current?.disconnect();
       clientRef.current = null;
       const lease = sessionLeaseRef.current;
