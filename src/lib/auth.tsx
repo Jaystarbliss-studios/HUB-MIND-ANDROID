@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
@@ -32,6 +32,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authorizationError, setAuthorizationError] = useState<string | null>(null);
+
+  // The Android wrapper uses a strict-origin Web Message channel to pass the
+  // signed-in Firebase identity to its native command receiver. Tokens remain
+  // in memory and are refreshed by Firebase; the normal browser app is a no-op.
+  useEffect(() => {
+    let generation = 0;
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      const currentGeneration = ++generation;
+      const bridge = (window as any).HubMindAndroid;
+      if (!firebaseUser) {
+        try { bridge?.postMessage?.(JSON.stringify({ type: 'clear' })); } catch {}
+        return;
+      }
+
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        if (currentGeneration !== generation || auth.currentUser?.uid !== firebaseUser.uid) return;
+        bridge?.postMessage?.(JSON.stringify({
+          type: 'session',
+          userId: firebaseUser.uid,
+          idToken,
+        }));
+      } catch (error) {
+        console.warn('[HubMind Android] Could not refresh native device-agent session:', error);
+      }
+    });
+
+    return () => {
+      generation += 1;
+      unsubscribe();
+      try {
+        (window as any).HubMindAndroid?.postMessage?.(JSON.stringify({ type: 'clear' }));
+      } catch {}
+    };
+  }, []);
 
   useEffect(() => {
     let stopProfile: (() => void) | null = null;
