@@ -283,7 +283,9 @@ async function startServer() {
     'chrome_read_page', 'chrome_find_element', 'chrome_click_element',
     'chrome_fill_field', 'chrome_scroll', 'chrome_capture_screenshot',
     'manage_windows_files', 'manage_windows_clipboard', 'control_windows_power',
-    'run_windows_command_native', 'scan_windows_storage', 'clean_windows_storage_candidates',
+    'scan_windows_storage', 'clean_windows_storage_candidates',
+    'start_windows_auto_scroll', 'stop_windows_auto_scroll', 'show_hub_mind_workspace',
+    'jess_stop', 'desktop_run_readonly_command', 'desktop_open_website',
   ]);
   const safeDeviceId = (value: unknown) => /^[A-Za-z0-9_-]{6,128}$/.test(String(value || ''));
   const userDevicePath = (uid: string, suffix = '') =>
