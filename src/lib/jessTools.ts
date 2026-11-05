@@ -470,6 +470,33 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
       userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this phone action in the current turn.' }
     }, ['actionType','userExplicitlyRequested'])
   },
+  {
+    name: 'dispatch_device_command',
+    description: 'Send one explicit owner-requested action to the currently selected registered Hub-Mind device, whether it is a Windows laptop or Android phone. The selected device must be online and have its device agent enabled. Use only for a direct request in the current turn; never automatically resend an action after a timeout or sent_unverified result. Windows actions require Jess Full Control to be active on the laptop. Android screen capture is started separately by the phone user through the Android system consent prompt.',
+    parameters: object({
+      actionType: { type: 'string', enum: [
+        'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS',
+        'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text','press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot','find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value','read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time','get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab','chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element','chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot','manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage','clean_windows_storage_candidates'
+      ]},
+      targetDeviceId: { type: 'string', description: 'Optional exact device ID. Defaults to the device selected in the Jess workspace.' },
+      parameters: { type: 'object', description: 'Arguments required by the chosen device action.', properties: {
+        x: { type: 'number' }, y: { type: 'number' },
+        startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' },
+        text: { type: 'string' }, appName: { type: 'string' }, packageName: { type: 'string' },
+        action: { type: 'string' }, value: { type: 'string' }, durationMs: { type: 'number' },
+        title: { type: 'string' }, handle: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' },
+        position: { type: 'string' }, monitorId: { type: 'string' }, delta: { type: 'number' },
+        keys: { type: 'string' }, name: { type: 'string' }, index: { type: 'number' }, expectedName: { type: 'string' },
+        path: { type: 'string' }, destination: { type: 'string' }, content: { type: 'string' }, pattern: { type: 'string' },
+        offset: { type: 'number' }, limit: { type: 'number' }, root: { type: 'string' },
+        largeThresholdMB: { type: 'number' }, inactiveDays: { type: 'number' }, maxSeconds: { type: 'number' },
+        maxFiles: { type: 'number' }, detectDuplicates: { type: 'boolean' }, scanId: { type: 'string' },
+        candidateIds: { type: 'array', items: { type: 'string' } }, monitorName: { type: 'string' }, detail: { type: 'string' },
+        url: { type: 'string' }, selector: { type: 'string' }, deltaY: { type: 'number' }, deltaX: { type: 'number' }
+      } },
+      userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this device action in the current turn.' }
+    }, ['actionType','userExplicitlyRequested'])
+  },
   { name: 'end_session', description: 'Put the AI assistant to sleep or end the current live voice session when the user says "end this session", "go to sleep", "sleep", "deactivate", or wants to conclude.', parameters: object({ reason: { type: 'string' } }) },
 ];
 
@@ -3361,6 +3388,161 @@ export async function executeJessTool(
             commandId: commandRef.id,
             deviceName: (target as any).deviceName || target.id,
             message: 'The command is safely queued for the Android device, but no completion acknowledgement has arrived yet. Do not send it again; check this command status before taking another action.'
+          }
+        };
+      }
+
+      case 'dispatch_device_command': {
+        if (args?.userExplicitlyRequested !== true) {
+          return { result: { success: false, error: 'A direct user request is required before operating a connected device.' } };
+        }
+        const actionType = String(args?.actionType || '').trim();
+        const androidActions = new Set([
+          'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP',
+          'GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
+          'NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
+        ]);
+        const windowsActions = new Set([
+          'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text',
+          'press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot',
+          'find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value',
+          'read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time',
+          'get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab',
+          'chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element',
+          'chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot',
+          'manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage',
+          'clean_windows_storage_candidates'
+        ]);
+        if (!androidActions.has(actionType) && !windowsActions.has(actionType)) {
+          return { result: { success: false, error: 'Unsupported device action.' } };
+        }
+
+        const rawParameters = args?.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)
+          ? args.parameters : {};
+        const parameters: Record<string, string | number | boolean | string[]> = {};
+        for (const [key, value] of Object.entries(rawParameters)) {
+          if (Array.isArray(value) && key === 'candidateIds') {
+            parameters[key] = value.map(item => String(item).slice(0, 160)).slice(0, 100);
+          } else if (typeof value === 'string') {
+            if (value.length > 5000) return { result: { success: false, error: 'A device command text field exceeds 5,000 characters.' } };
+            parameters[key] = value;
+          } else if (typeof value === 'boolean') {
+            parameters[key] = value;
+          } else if (typeof value === 'number' && Number.isFinite(value)) {
+            parameters[key] = value;
+          }
+        }
+        if (JSON.stringify(parameters).length > 20000) {
+          return { result: { success: false, error: 'Device command parameters are too large.' } };
+        }
+
+        const selectedId = String(args?.targetDeviceId || '').trim();
+        let target = null;
+        if (selectedId) {
+          const snapshot = await getDoc(doc(db, 'users', user.id, 'devices', selectedId));
+          if (snapshot.exists()) target = { id: snapshot.id, ...snapshot.data() };
+        } else {
+          const snapshot = await getDocs(collection(db, 'users', user.id, 'devices'));
+          const now = Date.now();
+          const online = snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))
+            .filter((device: any) => {
+              const lastSeen = typeof device.lastSeenAt === 'number' ? device.lastSeenAt : Date.parse(String(device.lastSeenAt || ''));
+              return device.status === 'ONLINE' && Number.isFinite(lastSeen) && now - lastSeen < 90000;
+            });
+          target = online.length === 1 ? online[0] : null;
+          if (!target && online.length > 1) {
+            return { result: { success: false, error: 'More than one device is online. Choose the Control target device in Jess settings first.' } };
+          }
+        }
+        if (!target) {
+          return { result: { success: false, error: 'No registered target device was found. Open Connected Devices and select an online phone or laptop.' } };
+        }
+
+        const platform = String((target as any).platform || '').toUpperCase();
+        const compatible = platform === 'ANDROID' ? androidActions.has(actionType) : platform === 'WINDOWS' ? windowsActions.has(actionType) : false;
+        if (!compatible) {
+          return { result: { success: false, error: 'The selected ' + platform + ' device does not support this action.' } };
+        }
+        const lastSeen = typeof (target as any).lastSeenAt === 'number'
+          ? (target as any).lastSeenAt
+          : Date.parse(String((target as any).lastSeenAt || ''));
+        if ((target as any).status !== 'ONLINE' || !Number.isFinite(lastSeen) || Date.now() - lastSeen >= 90000) {
+          return { result: { success: false, error: 'The selected device is offline or has not checked in recently.' } };
+        }
+        if (platform === 'WINDOWS' && (target as any).fullControlActive !== true) {
+          return { result: { success: false, error: 'Jess Full Control is not active on the selected Windows laptop. Enable it on that laptop first.' } };
+        }
+
+        const currentUser = auth.currentUser;
+        if (!currentUser || currentUser.uid !== user.id) {
+          return { result: { success: false, error: 'Your Hub-Mind sign-in session changed. Sign in again before controlling a device.' } };
+        }
+        const idToken = await currentUser.getIdToken(false);
+        const dispatchResponse = await fetch('/api/devices/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({
+            targetDeviceId: String((target as any).id || (target as any).deviceId),
+            actionType,
+            parameters,
+            sourceDeviceId: String((window as any).HubMindNative?.getAndroidDeviceId?.() || 'hubmind-workspace-client'),
+            requiresConfirmation: args?.requiresConfirmation === true,
+          }),
+        });
+        const dispatchData = await dispatchResponse.json().catch(() => ({}));
+        if (!dispatchResponse.ok || dispatchData?.success !== true || !dispatchData?.commandId) {
+          return { result: { success: false, error: dispatchData?.error || 'Hub-Mind could not queue the device action.' } };
+        }
+
+        const commandId = String(dispatchData.commandId);
+        const deadline = Date.now() + 16000;
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 650));
+          const statusResponse = await fetch('/api/devices/commands/' + encodeURIComponent(commandId), {
+            headers: { 'Authorization': 'Bearer ' + idToken, 'Accept': 'application/json' },
+          });
+          if (!statusResponse.ok) continue;
+          const statusData = await statusResponse.json().catch(() => ({}));
+          const command = statusData?.command || {};
+          const status = String(command.status || '');
+          const result = command.result || {};
+          if (status === 'COMPLETED' || status === 'SENT_UNVERIFIED') {
+            return {
+              result: {
+                success: result.success === true,
+                verified: result.verified === true,
+                status: result.verified === true ? 'done_verified' : 'sent_unverified',
+                commandId,
+                deviceName: String((target as any).deviceName || target.id),
+                platform,
+                message: String(result.outputText || 'The selected device acknowledged the command.'),
+                imageDataUrl: typeof result.imageDataUrl === 'string' ? result.imageDataUrl : null,
+              }
+            };
+          }
+          if (status === 'FAILED' || status === 'EXPIRED') {
+            return {
+              result: {
+                success: false,
+                status: 'failed',
+                commandId,
+                deviceName: String((target as any).deviceName || target.id),
+                platform,
+                error: String(result.error || command.error || 'The selected device could not execute the action.'),
+              }
+            };
+          }
+        }
+
+        return {
+          result: {
+            success: true,
+            verified: false,
+            status: 'sent_unverified',
+            commandId,
+            deviceName: String((target as any).deviceName || target.id),
+            platform,
+            message: 'The command remains queued or running on the selected device. No automatic retry was sent; check the device result before sending another action.',
           }
         };
       }
