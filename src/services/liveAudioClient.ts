@@ -86,31 +86,31 @@ export class LiveAudioClient {
   }
 
   private async getEphemeralToken(): Promise<string> {
-    // The backend deliberately creates Gemini Live tokens with uses: 1.
-    // They are single-session credentials and must never be shared between
-    // separate LiveAudioClient connections or reconnect attempts.
     const user = auth.currentUser;
     if (!user) {
-      throw new Error('Sign in to Hub-Mind before starting a Jess voice session.');
+      throw new Error('Sign in to Hub-Mind before starting Jess Live.');
     }
 
-    const idToken = await user.getIdToken(false);
+    // Gemini ephemeral tokens are single-use for starting a new session and
+    // have a short newSessionExpireTime. Never cache one across separate voice
+    // sessions; the server mints a fresh token for each new connection/resume.
+    const idToken = await user.getIdToken();
     const response = await fetch('/api/live-token', {
       method: 'POST',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`,
+        Authorization: `Bearer ${idToken}`,
       },
-      signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`Gemini Live authorization failed (${response.status}). ${errorText.slice(0, 300)}`);
+      const errorText = await response.text();
+      throw new Error(`Failed to mint Gemini Live session token: ${response.status} ${errorText}`);
     }
 
     const data = await response.json();
-    if (typeof data?.token !== 'string' || !data.token.trim()) {
+    if (typeof data?.token !== 'string' || !data.token) {
       throw new Error('Hub-Mind did not receive a valid Gemini Live session token.');
     }
     return data.token;
@@ -574,7 +574,7 @@ export class LiveAudioClient {
         try {
           const ai = new GoogleGenAI({
             apiKey: token,
-            httpOptions: { apiVersion: 'v1alpha' },
+            httpOptions: { apiVersion: 'v1beta' },
           });
           const session = await ai.live.connect({
             model: 'gemini-3.8-live',
