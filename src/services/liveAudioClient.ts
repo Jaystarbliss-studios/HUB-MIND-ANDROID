@@ -444,7 +444,7 @@ export class LiveAudioClient {
       }
       const availableTools = [
         ...JESS_TOOLS_DECLARATIONS.filter(tool =>
-          (isDesktopClient ? !desktopOnlyDomTools.has(tool.name) : (!JESS_NATIVE_TOOL_NAME_SET.has(tool.name) && tool.name !== 'dispatch_android_device_command')) &&
+          (isDesktopClient ? !desktopOnlyDomTools.has(tool.name) : !JESS_NATIVE_TOOL_NAME_SET.has(tool.name)) &&
           (context?.webResearchEnabled !== false || !webResearchTools.has(tool.name))
         ),
         ...mcpToolDeclarations,
