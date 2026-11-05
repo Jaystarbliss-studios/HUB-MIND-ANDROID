@@ -319,6 +319,21 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // Keep native Devices selection and the shared Jess workspace selector
+                // on the same per-account active target.
+                LaunchedEffect(devicesViewModel, webView) {
+                    var lastTargetId: String? = null
+                    devicesViewModel.uiState.collect { state ->
+                        val targetId = state.currentTargetDevice?.deviceId ?: return@collect
+                        if (targetId == lastTargetId) return@collect
+                        lastTargetId = targetId
+                        val quoted = JSONObject.quote(targetId)
+                        val script = "localStorage.setItem('hubmind.jess.activeTargetDeviceId.v1',$quoted);" +
+                            "window.dispatchEvent(new Event('hubmind-target-device-changed'));"
+                        webView.post { webView.evaluateJavascript(script, null) }
+                    }
+                }
+
                 BackHandler {
                     when {
                         currentTab != HubMindNavDestination.WORKSPACE -> {
