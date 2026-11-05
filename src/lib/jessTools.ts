@@ -3347,7 +3347,7 @@ export async function executeJessTool(
                 success: false,
                 status: 'failed',
                 commandId: commandRef.id,
-                error: data.error || 'The Android device could not execute the requested action.'
+                error: data.error || data.result?.error || 'The Android device could not execute the requested action.'
               }
             };
           }
