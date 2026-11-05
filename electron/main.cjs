@@ -1063,6 +1063,19 @@ app.whenReady().then(() => {
   });
   loadJessPreferences();
 
+  ipcMain.handle('hubmind:get-device-id', (event) => {
+    assertTrustedSender(event);
+    return getDesktopDeviceId();
+  });
+  ipcMain.handle('hubmind:set-device-session', async (event, userId, idToken) => {
+    assertTrustedSender(event);
+    return setDesktopDeviceSession(userId, idToken);
+  });
+  ipcMain.handle('hubmind:clear-device-session', (event) => {
+    assertTrustedSender(event);
+    return clearDesktopDeviceSession();
+  });
+
   const requireMcpUser = userId => {
     if (typeof userId !== 'string' || !userId.trim() || userId.length > 256) {
       throw new Error('A signed-in Hub-Mind user ID is required.');
