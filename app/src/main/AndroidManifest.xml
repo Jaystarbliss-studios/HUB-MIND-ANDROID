@@ -54,7 +54,11 @@
         <service
             android:name="com.example.hubmind.agent.HubMindAgentForegroundService"
             android:foregroundServiceType="specialUse"
-            android:exported="false" />
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-enabled Hub-Mind Android device command receiver." />
+        </service>
 
         <!-- Optional Voice Interaction Service (Default Assistant Role) -->
         <service
