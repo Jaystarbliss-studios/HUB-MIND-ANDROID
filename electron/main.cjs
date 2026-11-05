@@ -184,6 +184,14 @@ async function executeRemoteWindowsCommand(command, userId) {
   }
   const toolName = String(command?.actionType || '');
   const args = command?.parameters && typeof command.parameters === 'object' ? command.parameters : {};
+  if (toolName === 'manage_windows_files' &&
+      ['delete','remove','recycle','write','move','rename','copy'].includes(String(args.action || '').toLowerCase()) &&
+      jessPreferences.allowAutomatedFileManagement !== true) {
+    throw new Error('Automated file management is disabled in Jess settings on this laptop. No file changes were made.');
+  }
+  if (toolName === 'clean_windows_storage_candidates' && jessPreferences.allowAutomatedFileManagement !== true) {
+    throw new Error('Automated file management is disabled in Jess settings on this laptop. No cleanup was performed.');
+  }
   const approved = await confirmRemoteDesktopAction(toolName, args);
   if (!approved) throw new Error('The Windows user cancelled this remote action.');
 
