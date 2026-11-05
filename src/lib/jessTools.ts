@@ -476,7 +476,7 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
     parameters: object({
       actionType: { type: 'string', enum: [
         'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS',
-        'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text','press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot','find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value','read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time','get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab','chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element','chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot','manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage','clean_windows_storage_candidates'
+        'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text','press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot','find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value','read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time','get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab','chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element','chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot','manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage','clean_windows_storage_candidates','start_windows_auto_scroll','stop_windows_auto_scroll','show_hub_mind_workspace','jess_stop','desktop_run_readonly_command','desktop_open_website'
       ]},
       targetDeviceId: { type: 'string', description: 'Optional exact device ID. Defaults to the device selected in the Jess workspace.' },
       parameters: { type: 'object', description: 'Arguments required by the chosen device action.', properties: {
@@ -492,7 +492,9 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
         largeThresholdMB: { type: 'number' }, inactiveDays: { type: 'number' }, maxSeconds: { type: 'number' },
         maxFiles: { type: 'number' }, detectDuplicates: { type: 'boolean' }, scanId: { type: 'string' },
         candidateIds: { type: 'array', items: { type: 'string' } }, monitorName: { type: 'string' }, detail: { type: 'string' },
-        url: { type: 'string' }, selector: { type: 'string' }, deltaY: { type: 'number' }, deltaX: { type: 'number' }
+        url: { type: 'string' }, selector: { type: 'string' }, deltaY: { type: 'number' }, deltaX: { type: 'number' },
+        direction: { type: 'string', enum: ['up','down'] }, speed: { type: 'number' },
+        commandName: { type: 'string', enum: ['ipconfig','systemInfo','runningProcesses'] }
       } },
       userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this device action in the current turn.' }
     }, ['actionType','userExplicitlyRequested'])
