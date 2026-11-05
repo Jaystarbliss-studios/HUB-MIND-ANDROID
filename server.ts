@@ -508,6 +508,9 @@ async function startServer() {
           outputText: String(result.outputText || '').slice(0, 4000),
           error: String(result.error || '').slice(0, 1000),
           durationMs: Math.max(0, Math.min(Number(result.durationMs) || 0, 120000)),
+          ...(typeof result.imageDataUrl === 'string' && result.imageDataUrl.length <= 650000
+            ? { imageDataUrl: result.imageDataUrl }
+            : {}),
         },
         completedAt: new Date().toISOString(),
       });
