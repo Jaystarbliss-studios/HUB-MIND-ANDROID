@@ -213,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!isBrowser) return;
+    if (typeof window === 'undefined') return;
     const handleNativeSignOut = () => {
       void signOut(auth).catch(error => {
         console.warn('[HubMind] Native sign-out request failed:', error);
@@ -228,7 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // also fires when Firebase refreshes the ID token, so the foreground service
   // does not keep polling with an expired credential.
   useEffect(() => {
-    if (!isBrowser) return;
+    if (typeof window === 'undefined') return;
     const stopTokenListener = onIdTokenChanged(auth, async (firebaseUser) => {
       const bridge = (window as any).HubMindNative;
       if (!bridge) return;
