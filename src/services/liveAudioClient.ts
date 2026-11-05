@@ -383,7 +383,7 @@ export class LiveAudioClient {
       const mcpToolsPromise = (isDesktopClient && context?.userId && desktop?.mcpListTools)
         ? Promise.race([
             (async () => await desktop.mcpListTools(context.userId))(),
-            new Promise<any[]>(resolve => setTimeout(() => resolve([]), 1200)),
+            new Promise<any[]>(resolve => setTimeout(() => resolve([]), 400)),
           ]).catch(() => [])
         : Promise.resolve([]);
 
@@ -394,12 +394,15 @@ export class LiveAudioClient {
 
       let userMemoriesSummary = 'No stored memories yet.';
       const memoriesPromise = context?.userId && context?.memoryEnabled !== false
-        ? getUserMemories(context.userId)
-            .then(memories => formatMemoriesForPrompt(memories))
-            .catch(memErr => {
-              console.warn('[LiveClient] Failed to load user memories:', memErr);
-              return 'No stored memories yet.';
-            })
+        ? Promise.race([
+            getUserMemories(context.userId)
+              .then(memories => formatMemoriesForPrompt(memories))
+              .catch(memErr => {
+                console.warn('[LiveClient] Failed to load user memories:', memErr);
+                return 'No stored memories yet.';
+              }),
+            new Promise<string>(resolve => setTimeout(() => resolve('No stored memories yet.'), 450)),
+          ])
         : Promise.resolve('No stored memories yet.');
 
       let token = '';
@@ -441,7 +444,7 @@ export class LiveAudioClient {
       }
       const availableTools = [
         ...JESS_TOOLS_DECLARATIONS.filter(tool =>
-          (isDesktopClient ? !desktopOnlyDomTools.has(tool.name) : !JESS_NATIVE_TOOL_NAME_SET.has(tool.name)) &&
+          (isDesktopClient ? !desktopOnlyDomTools.has(tool.name) : (!JESS_NATIVE_TOOL_NAME_SET.has(tool.name) && tool.name !== 'dispatch_android_device_command')) &&
           (context?.webResearchEnabled !== false || !webResearchTools.has(tool.name))
         ),
         ...mcpToolDeclarations,
