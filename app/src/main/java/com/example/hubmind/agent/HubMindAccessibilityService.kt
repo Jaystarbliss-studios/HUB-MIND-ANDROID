@@ -70,7 +70,7 @@ class HubMindAccessibilityService : AccessibilityService() {
         )
     }
 
-    fun performTapAt(x: Float, y: Float, durationMs: Long = 100, onComplete: (Boolean) -> Unit = {}) {
+    fun performTapAt(x: Float, y: Float, durationMs: Long = 100, onComplete: (Boolean) -> Unit = {}): Boolean {
         val path = Path().apply {
             moveTo(x, y)
         }
@@ -78,7 +78,7 @@ class HubMindAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
-        dispatchGesture(gesture, object : GestureResultCallback() {
+        return dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 onComplete(true)
             }
@@ -94,7 +94,7 @@ class HubMindAccessibilityService : AccessibilityService() {
         endX: Float, endY: Float,
         durationMs: Long = 300,
         onComplete: (Boolean) -> Unit = {}
-    ) {
+    ): Boolean {
         val path = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
@@ -103,7 +103,7 @@ class HubMindAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
-        dispatchGesture(gesture, object : GestureResultCallback() {
+        return dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 onComplete(true)
             }
