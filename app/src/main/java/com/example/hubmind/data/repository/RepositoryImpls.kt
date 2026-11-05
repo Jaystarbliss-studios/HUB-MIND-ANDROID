@@ -13,6 +13,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 class AuthRepositoryImpl : AuthRepository {
     private val _currentUser = MutableStateFlow<User?>(
@@ -299,69 +302,163 @@ class JessRepositoryImpl(
 }
 
 class DeviceRegistryRepositoryImpl(private val context: Context) : DeviceRegistryRepository {
-    private val androidNode = DeviceNode(
-        deviceId = "android-pixel-01",
-        deviceName = "Hub-Mind Android Phone",
-        platform = DevicePlatform.ANDROID,
-        clientVersion = "2.4.0-native",
-        status = DeviceStatus.ONLINE,
-        isCurrentDevice = true,
-        fullControlActive = true,
-        permissionMode = "allow-routine",
-        capabilities = listOf(
-            DeviceCapability.ANDROID_ACCESSIBILITY,
-            DeviceCapability.MEDIA_STREAMING,
-            DeviceCapability.NOTIFICATION_LISTENER,
-            DeviceCapability.CAMERA_CAPTURE,
-            DeviceCapability.STORAGE_MANAGEMENT
-        ),
-        batteryPercent = 88,
-        ipAddress = "192.168.1.185"
+    private val appContext = context.applicationContext
+    private val preferences = appContext.getSharedPreferences(
+        "hubmind_native_session",
+        Context.MODE_PRIVATE
     )
-
-    private val windowsNode = DeviceNode(
-        deviceId = "win-main-workstation",
-        deviceName = "ThinkPad P1 Gen 6 (Windows 11)",
-        platform = DevicePlatform.WINDOWS,
-        clientVersion = "2.4.0-desktop",
-        status = DeviceStatus.ONLINE,
-        isCurrentDevice = false,
-        fullControlActive = true,
-        permissionMode = "allow-routine",
-        capabilities = listOf(
-            DeviceCapability.WINDOW_MANAGEMENT,
-            DeviceCapability.MOUSE_KEYBOARD_INPUT,
-            DeviceCapability.SCREEN_READING,
-            DeviceCapability.APP_LAUNCH,
-            DeviceCapability.POWERSHELL_EXECUTION,
-            DeviceCapability.CHROME_AUTOMATION,
-            DeviceCapability.STORAGE_MANAGEMENT
-        ),
-        batteryPercent = 94,
-        ipAddress = "192.168.1.142"
-    )
-
-    private val _devices = MutableStateFlow<List<DeviceNode>>(listOf(androidNode, windowsNode))
+    private val _devices = MutableStateFlow<List<DeviceNode>>(emptyList())
     override val devices: StateFlow<List<DeviceNode>> = _devices.asStateFlow()
 
-    private val _currentTargetDevice = MutableStateFlow<DeviceNode?>(windowsNode)
+    private val _currentTargetDevice = MutableStateFlow<DeviceNode?>(null)
     override val currentTargetDevice: StateFlow<DeviceNode?> = _currentTargetDevice.asStateFlow()
 
+    init {
+        CoroutineScope(Dispatchers.IO).launch { refreshDevices() }
+    }
+
     override suspend fun selectTargetDevice(deviceId: String) {
-        _currentTargetDevice.value = _devices.value.find { it.deviceId == deviceId }
+        val selected = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return
+        preferences.edit().putString(
+            com.example.hubmind.agent.HubMindNativeBridge.KEY_ACTIVE_TARGET_DEVICE_ID,
+            selected.deviceId
+        ).apply()
+        _currentTargetDevice.value = selected
     }
 
     override suspend fun registerCurrentDevice(androidNode: DeviceNode) {
-        _devices.value = _devices.value.filter { it.deviceId != androidNode.deviceId } + androidNode
+        val currentId = androidDeviceId()
+        if (androidNode.deviceId != currentId) return
+        _devices.value = (_devices.value.filterNot { it.deviceId == currentId } + androidNode)
+        if (preferences.getString(ACTIVE_TARGET_KEY, null).isNullOrBlank()) {
+            selectTargetDevice(currentId)
+        }
     }
 
     override suspend fun pingDevice(deviceId: String): Boolean {
-        delay(350)
-        return true
+        refreshDevices()
+        return _devices.value.any { it.deviceId == deviceId && it.status == DeviceStatus.ONLINE }
     }
 
-    override suspend fun refreshDevices() {
-        delay(200)
+    override suspend fun refreshDevices() = withContext(Dispatchers.IO) {
+        val idToken = preferences.getString(
+            com.example.hubmind.agent.HubMindNativeBridge.KEY_ID_TOKEN,
+            null
+        )?.takeIf { it.isNotBlank() } ?: run {
+            _devices.value = emptyList()
+            _currentTargetDevice.value = null
+            return@withContext
+        }
+
+        val connection = (URL(DEVICES_API_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 7000
+            readTimeout = 9000
+            useCaches = false
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Authorization", "Bearer $idToken")
+        }
+
+        try {
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (statusCode !in 200..299) {
+                throw IllegalStateException("Hub-Mind device registry returned HTTP $statusCode.")
+            }
+
+            val payload = org.json.JSONObject(body)
+            val list = payload.optJSONArray("devices") ?: org.json.JSONArray()
+            val currentId = androidDeviceId()
+            val now = System.currentTimeMillis()
+            val mapped = buildList {
+                for (index in 0 until list.length()) {
+                    val item = list.optJSONObject(index) ?: continue
+                    val id = item.optString("id").ifBlank { item.optString("deviceId") }
+                    if (id.isBlank()) continue
+                    val platform = runCatching {
+                        DevicePlatform.valueOf(item.optString("platform", "WEB").uppercase())
+                    }.getOrDefault(DevicePlatform.WEB)
+                    val lastSeen = parseTimestamp(item.opt("lastSeenAt"))
+                    val remoteStatus = runCatching {
+                        DeviceStatus.valueOf(item.optString("status", "OFFLINE").uppercase())
+                    }.getOrDefault(DeviceStatus.OFFLINE)
+                    val status = if (
+                        remoteStatus != DeviceStatus.UNAVAILABLE &&
+                        (lastSeen <= 0L || now - lastSeen > DEVICE_ONLINE_WINDOW_MS)
+                    ) DeviceStatus.OFFLINE else remoteStatus
+                    val capabilitiesJson = item.optJSONArray("capabilities") ?: org.json.JSONArray()
+                    val capabilities = buildList {
+                        for (capIndex in 0 until capabilitiesJson.length()) {
+                            val name = capabilitiesJson.optString(capIndex)
+                                .uppercase().replace('-', '_').replace(' ', '_')
+                            runCatching { DeviceCapability.valueOf(name) }.getOrNull()?.let(::add)
+                        }
+                    }
+                    val battery = if (item.has("batteryPercent") && !item.isNull("batteryPercent")) {
+                        item.optInt("batteryPercent").coerceIn(0, 100)
+                    } else if (id == currentId) currentBatteryPercent() else null
+                    add(
+                        DeviceNode(
+                            deviceId = id,
+                            deviceName = item.optString("deviceName").ifBlank { "Hub-Mind device" },
+                            platform = platform,
+                            clientVersion = item.optString("clientVersion").ifBlank { "unknown" },
+                            status = status,
+                            isCurrentDevice = id == currentId,
+                            fullControlActive = item.optBoolean("fullControlActive", false),
+                            permissionMode = item.optString("permissionMode", "ask"),
+                            capabilities = capabilities,
+                            lastSeenAt = lastSeen,
+                            batteryPercent = battery,
+                            ipAddress = item.optString("ipAddress").takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+            }.sortedWith(
+                compareByDescending<DeviceNode> { it.isCurrentDevice }
+                    .thenByDescending { it.status == DeviceStatus.ONLINE }
+                    .thenBy { it.deviceName.lowercase() }
+            )
+
+            _devices.value = mapped
+            val storedTarget = preferences.getString(ACTIVE_TARGET_KEY, null)
+            val target = mapped.firstOrNull { it.deviceId == storedTarget }
+                ?: mapped.firstOrNull { it.isCurrentDevice && it.status == DeviceStatus.ONLINE }
+                ?: mapped.firstOrNull { it.status == DeviceStatus.ONLINE }
+            _currentTargetDevice.value = target
+            if (storedTarget.isNullOrBlank() && target != null) {
+                preferences.edit().putString(ACTIVE_TARGET_KEY, target.deviceId).apply()
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun androidDeviceId(): String =
+        android.provider.Settings.Secure.getString(
+            appContext.contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID
+        )?.takeIf { it.isNotBlank() } ?: "android-device-unavailable"
+
+    private fun currentBatteryPercent(): Int? {
+        val manager = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val value = manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        return value.takeIf { it in 0..100 }
+    }
+
+    private fun parseTimestamp(value: Any?): Long {
+        if (value is Number) return value.toLong()
+        val raw = value?.toString().orEmpty()
+        if (raw.isBlank()) return 0L
+        raw.toLongOrNull()?.let { return it }
+        return runCatching { java.time.Instant.parse(raw).toEpochMilli() }.getOrDefault(0L)
+    }
+
+    companion object {
+        private const val DEVICES_API_URL = "https://hub-mind.netlify.app/api/devices"
+        private const val ACTIVE_TARGET_KEY = "activeTargetDeviceId"
+        private const val DEVICE_ONLINE_WINDOW_MS = 90_000L
     }
 }
 
