@@ -149,12 +149,12 @@ function summarizeRemoteNativeResult(result) {
 
 async function confirmRemoteDesktopAction(actionType, args = {}) {
   const warningActions = new Set([
-    'close_window', 'control_windows_power', 'manage_windows_files',
+    'close_window', 'control_windows_power',
     'clean_windows_storage_candidates', 'run_windows_command_native', 'desktop_open_website',
   ]);
   const fileAction = String(args?.action || '').toLowerCase();
   const needsFileConfirmation = actionType === 'manage_windows_files'
-    && ['delete', 'remove', 'recycle', 'write', 'move', 'rename'].includes(fileAction);
+    && ['delete', 'remove', 'recycle', 'write', 'move', 'rename', 'copy'].includes(fileAction);
   if (!warningActions.has(actionType) && !needsFileConfirmation) return true;
 
   const details = actionType === 'control_windows_power'
