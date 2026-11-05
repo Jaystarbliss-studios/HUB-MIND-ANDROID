@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
@@ -32,6 +32,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authorizationError, setAuthorizationError] = useState<string | null>(null);
+
+  // The Android wrapper uses a strict-origin Web Message channel to pass the
+  // signed-in Firebase identity to its native command receiver. Tokens remain
+  // in memory and are refreshed by Firebase; the normal browser app is a no-op.
+  useEffect(() => {
+    let generation = 0;
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      const currentGeneration = ++generation;
+      const bridge = (window as any).HubMindAndroid;
+      if (!firebaseUser) {
+        try { bridge?.postMessage?.(JSON.stringify({ type: 'clear' })); } catch {}
+        return;
+      }
+
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        if (currentGeneration !== generation || auth.currentUser?.uid !== firebaseUser.uid) return;
+        bridge?.postMessage?.(JSON.stringify({
+          type: 'session',
+          userId: firebaseUser.uid,
+          idToken,
+        }));
+      } catch (error) {
+        console.warn('[HubMind Android] Could not refresh native device-agent session:', error);
+      }
+    });
+
+    return () => {
+      generation += 1;
+      unsubscribe();
+      try {
+        (window as any).HubMindAndroid?.postMessage?.(JSON.stringify({ type: 'clear' }));
+      } catch {}
+    };
+  }, []);
 
   useEffect(() => {
     let stopProfile: (() => void) | null = null;
@@ -175,6 +210,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
     });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleNativeSignOut = () => {
+      void signOut(auth).catch(error => {
+        console.warn('[HubMind] Native sign-out request failed:', error);
+      });
+    };
+    window.addEventListener('hubmind-native-signout', handleNativeSignOut);
+    return () => window.removeEventListener('hubmind-native-signout', handleNativeSignOut);
+  }, []);
+
+  // When this workspace is hosted inside the Android app, keep the native
+  // device agent authenticated with the same Firebase identity. onIdTokenChanged
+  // also fires when Firebase refreshes the ID token, so the foreground service
+  // does not keep polling with an expired credential.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stopTokenListener = onIdTokenChanged(auth, async (firebaseUser) => {
+      const nativeBridge = (window as any).HubMindNative;
+      const desktopBridge = (window as any).hubMindDesktop;
+      if (!firebaseUser) {
+        try { nativeBridge?.onHubMindSignOut?.(); } catch {}
+        try { await desktopBridge?.clearDeviceSession?.(); } catch {}
+        return;
+      }
+      try {
+        const idToken = await firebaseUser.getIdToken(false);
+        try { nativeBridge?.onHubMindAuth?.(firebaseUser.uid, idToken); } catch {}
+        try { await desktopBridge?.setDeviceSession?.(firebaseUser.uid, idToken); } catch (error) {
+          console.warn('[HubMind] Desktop device registration sync was unavailable:', error);
+        }
+      } catch (error) {
+        console.warn('[HubMind] Device session sync was unavailable:', error);
+      }
+    });
+    return () => stopTokenListener();
   }, []);
 
   const updatePreferredName = async (preferredName: string) => {

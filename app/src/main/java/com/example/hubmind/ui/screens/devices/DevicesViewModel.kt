@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 data class DevicesUiState(
     val devices: List<DeviceNode> = emptyList(),
@@ -25,6 +27,13 @@ class DevicesViewModel(
 
     init {
         viewModelScope.launch {
+            deviceRegistryRepository.refreshDevices()
+            while (isActive) {
+                delay(15_000L)
+                runCatching { deviceRegistryRepository.refreshDevices() }
+            }
+        }
+        viewModelScope.launch {
             deviceRegistryRepository.devices.collect { list ->
                 _uiState.value = _uiState.value.copy(devices = list)
             }
@@ -34,6 +43,17 @@ class DevicesViewModel(
             deviceRegistryRepository.currentTargetDevice.collect { target ->
                 _uiState.value = _uiState.value.copy(currentTargetDevice = target)
             }
+        }
+    }
+
+    fun refreshDevices() {
+        viewModelScope.launch {
+            runCatching { deviceRegistryRepository.refreshDevices() }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        pingStatusMessage = error.message ?: "Could not refresh connected devices."
+                    )
+                }
         }
     }
 
@@ -52,7 +72,7 @@ class DevicesViewModel(
             val success = deviceRegistryRepository.pingDevice(deviceId)
             _uiState.value = _uiState.value.copy(
                 isPinging = false,
-                pingStatusMessage = if (success) "Ping acknowledged (38ms round-trip via local subnet RPC)." else "Device unreachable."
+                pingStatusMessage = if (success) "Device is currently online." else "Device is offline or has not checked in recently."
             )
         }
     }

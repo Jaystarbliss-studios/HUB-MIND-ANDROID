@@ -14,6 +14,7 @@ import fs from "fs";
 import { createServer as createViteServer, createLogger } from "vite";
 import OpenAI from "openai";
 import { WebSocketServer } from "ws";
+import { createHash, randomUUID } from "node:crypto";
 import { firebaseAdminRequest, firestoreDocumentUrl, firebaseAuthAdminUrl, decodeFirestoreFields, encodeFirestoreFields } from "./src/server/firebaseAdminRest.ts";
 import { getFullRepositoryStatus, fetchHubMindReleases, fetchHubMindCommits, inspectCodebase } from "./src/server/githubService.ts";
 import { performGlobalWebSearch } from "./src/server/webSearchService.ts";
@@ -123,6 +124,70 @@ async function startServer() {
     }
     return { uid: identity.localId, email, profile };
   };
+  const authenticatedDeviceSessionCache = new Map<string, { uid: string; email: string; profile: any; expiresAt: number }>();
+  const verifyAuthenticatedHubMindRequest = async (req: any) => {
+    const authHeader = String(req.headers.authorization || '');
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (!idToken || idToken.length > 10000) {
+      const error: any = new Error('Sign in to Hub-Mind before using device controls.');
+      error.status = 401;
+      throw error;
+    }
+
+    const cacheKey = createHash('sha256').update(idToken).digest('hex');
+    const cachedSession = authenticatedDeviceSessionCache.get(cacheKey);
+    if (cachedSession && cachedSession.expiresAt > Date.now()) {
+      return { uid: cachedSession.uid, email: cachedSession.email, profile: cachedSession.profile };
+    }
+
+    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+    if (!apiKey) {
+      const error: any = new Error('Firebase token verification is not configured on this server.');
+      error.status = 503;
+      throw error;
+    }
+
+    const response = await fetch(
+      'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    const data: any = await response.json().catch(() => ({}));
+    const identity = data?.users?.[0];
+    if (!response.ok || !identity?.localId || identity.disabled) {
+      const error: any = new Error('Your Hub-Mind sign-in session is invalid or expired.');
+      error.status = 401;
+      throw error;
+    }
+
+    const profileResponse: any = await firebaseAdminRequest(
+      firestoreDocumentUrl('users/' + encodeURIComponent(identity.localId)),
+    );
+    const profile = decodeFirestoreFields(profileResponse?.fields || {});
+    if (profile?.status !== 'active' || !['admin', 'staff'].includes(String(profile?.role || ''))) {
+      const error: any = new Error('Your Hub-Mind account is not active for device control.');
+      error.status = 403;
+      throw error;
+    }
+    const verifiedSession = {
+      uid: identity.localId,
+      email: String(identity.email || '').trim().toLowerCase(),
+      profile,
+      expiresAt: Date.now() + 30_000,
+    };
+    authenticatedDeviceSessionCache.set(cacheKey, verifiedSession);
+    if (authenticatedDeviceSessionCache.size > 5000) {
+      for (const [key, value] of authenticatedDeviceSessionCache) {
+        if (value.expiresAt <= Date.now()) authenticatedDeviceSessionCache.delete(key);
+      }
+    }
+    return { uid: verifiedSession.uid, email: verifiedSession.email, profile: verifiedSession.profile };
+  };
+
   const listAdminUserProfiles = async () => {
     const data: any = await firebaseAdminRequest(firestoreDocumentUrl('users?pageSize=1000'));
     return (data?.documents || []).map((entry: any) => ({ id: String(entry.name || '').split('/').pop() || '', ...decodeFirestoreFields(entry.fields || {}) }));
@@ -196,7 +261,287 @@ async function startServer() {
   });
 
 
+  // Authenticated cross-device command plane. Device records and commands are scoped
+  // to the verified Firebase uid; clients can never address another user's device paths.
+  const androidActionTypes = new Set([
+    'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'CLEAR_TEXT',
+    'OPEN_APP', 'GET_INSTALLED_APPS', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN',
+    'SET_CLIPBOARD', 'GET_CLIPBOARD', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS',
+    'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS',
+  ]);
+  // Windows commands are accepted only for the registered Windows endpoint; the
+  // desktop receiver performs a second local Full Control check before execution.
+  const windowsActionTypes = new Set([
+    'list_windows', 'manage_windows', 'control_mouse', 'drag_windows_mouse',
+    'type_windows_text', 'press_windows_keys', 'control_system_volume',
+    'control_screen_brightness', 'take_windows_screenshot',
+    'find_windows_ui_element', 'list_windows_ui_elements', 'invoke_windows_ui_element',
+    'set_windows_ui_value', 'read_windows_screen', 'open_local_windows_path',
+    'launch_windows_application', 'get_windows_time', 'get_windows_system_info',
+    'chrome_bridge_status', 'chrome_list_tabs', 'chrome_open_tab', 'chrome_close_tab',
+    'chrome_activate_tab', 'chrome_navigate_tab', 'chrome_reload_tab',
+    'chrome_read_page', 'chrome_find_element', 'chrome_click_element',
+    'chrome_fill_field', 'chrome_scroll', 'chrome_capture_screenshot',
+    'manage_windows_files', 'manage_windows_clipboard', 'control_windows_power',
+    'scan_windows_storage', 'clean_windows_storage_candidates',
+    'start_windows_auto_scroll', 'stop_windows_auto_scroll', 'show_hub_mind_workspace',
+    'jess_stop', 'desktop_run_readonly_command', 'desktop_open_website',
+  ]);
+  const safeDeviceId = (value: unknown) => /^[A-Za-z0-9_-]{6,128}$/.test(String(value || ''));
+  const userDevicePath = (uid: string, suffix = '') =>
+    'users/' + encodeURIComponent(uid) + '/devices' + suffix;
+  const userCommandPath = (uid: string, suffix = '') =>
+    'users/' + encodeURIComponent(uid) + '/deviceCommands' + suffix;
+  const readFirestoreDoc = async (path: string) => {
+    try {
+      return await firebaseAdminRequest(firestoreDocumentUrl(path));
+    } catch (error: any) {
+      if (Number(error?.status) === 404) return null;
+      throw error;
+    }
+  };
+  const patchFirestoreDoc = async (path: string, values: Record<string, any>) => {
+    const params = new URLSearchParams();
+    Object.keys(values).forEach(key => params.append('updateMask.fieldPaths', key));
+    return firebaseAdminRequest(firestoreDocumentUrl(path) + '?' + params.toString(), {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: encodeFirestoreFields(values) }),
+    });
+  };
+  const createFirestoreDoc = async (collectionPath: string, documentId: string, values: Record<string, any>) => {
+    return firebaseAdminRequest(
+      firestoreDocumentUrl(collectionPath) + '?documentId=' + encodeURIComponent(documentId),
+      { method: 'POST', body: JSON.stringify({ fields: encodeFirestoreFields(values) }) },
+    );
+  };
+  const getDeviceRecord = async (uid: string, deviceId: string): Promise<Record<string, any> | null> => {
+    const raw: any = await readFirestoreDoc(userDevicePath(uid, '/' + encodeURIComponent(deviceId)));
+    return raw ? { id: deviceId, ...decodeFirestoreFields(raw.fields || {}) } : null;
+  };
+
+  app.get('/api/devices', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const result: any = await firebaseAdminRequest(
+        firestoreDocumentUrl(userDevicePath(actor.uid) + '?pageSize=100'),
+      );
+      const devices = (result?.documents || []).map((entry: any) => ({
+        id: String(entry.name || '').split('/').pop() || '',
+        ...decodeFirestoreFields(entry.fields || {}),
+      }));
+      return res.json({ success: true, devices });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Could not list devices:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not load registered devices.' : (error?.message || 'Device list failed.') });
+    }
+  });
+
+  app.post('/api/devices/register', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid device ID.' });
+
+      const platform = String(req.body?.platform || 'ANDROID').trim().toUpperCase();
+      if (!['ANDROID', 'WINDOWS'].includes(platform)) return res.status(400).json({ error: 'Device platform must be ANDROID or WINDOWS.' });
+      const defaultName = platform === 'WINDOWS' ? 'Windows desktop' : 'Android device';
+      const deviceName = String(req.body?.deviceName || defaultName).trim().slice(0, 120) || defaultName;
+      const capabilities = Array.isArray(req.body?.capabilities)
+        ? req.body.capabilities.map((item: unknown) => String(item).slice(0, 80)).slice(0, 40)
+        : [];
+      const now = new Date().toISOString();
+      const values = {
+        deviceId,
+        deviceName,
+        platform,
+        status: 'ONLINE',
+        capabilities,
+        clientVersion: String(req.body?.clientVersion || 'unknown').slice(0, 40),
+        model: String(req.body?.model || '').slice(0, 100),
+        lastSeenAt: now,
+        registeredAt: String(req.body?.registeredAt || now).slice(0, 40),
+        fullControlActive: req.body?.fullControlActive === true,
+        isCurrentDevice: true,
+        permissionMode: String(req.body?.permissionMode || 'ask').slice(0, 40),
+        ...(Number.isFinite(Number(req.body?.batteryPercent)) ? { batteryPercent: Math.max(0, Math.min(100, Number(req.body.batteryPercent))) } : {}),
+      };
+
+      const path = userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId));
+      const existing = await readFirestoreDoc(path);
+      if (existing) {
+        await patchFirestoreDoc(path, values);
+      } else {
+        await createFirestoreDoc(userDevicePath(actor.uid), deviceId, values);
+      }
+      return res.json({ success: true, device: values });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Device registration failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not register this Android device.' : (error?.message || 'Device registration failed.') });
+    }
+  });
+
+  app.post('/api/devices/dispatch', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const targetDeviceId = String(req.body?.targetDeviceId || '').trim();
+      const requestedAction = String(req.body?.actionType || '').trim();
+      const parameters = req.body?.parameters && typeof req.body.parameters === 'object' && !Array.isArray(req.body.parameters)
+        ? req.body.parameters
+        : {};
+      if (!safeDeviceId(targetDeviceId)) return res.status(400).json({ error: 'Choose a registered phone or computer.' });
+      if (JSON.stringify(parameters).length > 20000) return res.status(413).json({ error: 'Device command parameters are too large.' });
+
+      const device = await getDeviceRecord(actor.uid, targetDeviceId);
+      if (!device || !['ANDROID', 'WINDOWS'].includes(String(device.platform || ''))) {
+        return res.status(404).json({ error: 'That device is not registered to this Hub-Mind account.' });
+      }
+      const platform = String(device.platform).toUpperCase();
+      const actionType = platform === 'ANDROID' ? requestedAction.toUpperCase() : requestedAction;
+      if (platform === 'ANDROID' && !androidActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Android device action.' });
+      if (platform === 'WINDOWS' && !windowsActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Windows device action.' });
+      if (device.status !== 'ONLINE') return res.status(409).json({ error: 'The target device is offline or has not checked in recently.' });
+      if (platform === 'WINDOWS' && device.fullControlActive !== true) {
+        return res.status(409).json({ error: 'Windows Full Control is not active on the target laptop. Open Hub-Mind on that laptop and enable Jess Full Control.' });
+      }
+
+      const now = Date.now();
+      const commandId = 'cmd_' + randomUUID().replace(/-/g, '');
+      const command = {
+        commandId,
+        issuingUserId: actor.uid,
+        sourceDeviceId: String(req.body?.sourceDeviceId || 'hubmind-workspace-client').slice(0, 128),
+        targetDeviceId,
+        actionType,
+        parameters,
+        status: 'PENDING',
+        requiresConfirmation: req.body?.requiresConfirmation === true,
+        createdAt: new Date(now).toISOString(),
+        expiresAt: now + 90000,
+      };
+      await createFirestoreDoc(userCommandPath(actor.uid), commandId, command);
+      return res.status(202).json({ success: true, commandId, status: 'PENDING', expiresAt: command.expiresAt });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command dispatch failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not dispatch the Android device command.' : (error?.message || 'Device command dispatch failed.') });
+    }
+  });
+
+  app.post('/api/devices/poll', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid Android device ID.' });
+      const device = await getDeviceRecord(actor.uid, deviceId);
+      if (!device || !['ANDROID', 'WINDOWS'].includes(String(device.platform || ''))) {
+        return res.status(404).json({ error: 'This device is not registered to this Hub-Mind account.' });
+      }
+      const platform = String(device.platform).toUpperCase();
+      const fullControlActive = req.body?.fullControlActive === true
+        ? true
+        : platform === 'ANDROID' ? device.fullControlActive === true : false;
+      await patchFirestoreDoc(userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId)), {
+        status: 'ONLINE',
+        lastSeenAt: new Date().toISOString(),
+        fullControlActive,
+      });
+      if (platform === 'WINDOWS' && !fullControlActive) {
+        return res.json({ success: true, commands: [], note: 'Windows Full Control is not active; no remote actions were returned.' });
+      }
+
+      let result: any = null;
+      try {
+        result = await firebaseAdminRequest(firestoreDocumentUrl(userCommandPath(actor.uid) + '?pageSize=100'));
+      } catch (error: any) {
+        if (Number(error?.status) !== 404) throw error;
+      }
+
+      const candidates = (result?.documents || [])
+        .map((entry: any) => ({
+          id: String(entry.name || '').split('/').pop() || '',
+          ...decodeFirestoreFields(entry.fields || {}),
+        }))
+        .filter((command: any) =>
+          command.targetDeviceId === deviceId &&
+          ['PENDING', 'CREATED'].includes(String(command.status || '')) &&
+          Number(command.expiresAt || 0) > Date.now(),
+        )
+        .slice(0, 5);
+
+      const commands = [];
+      for (const command of candidates) {
+        await patchFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(command.id)), {
+          status: 'RUNNING',
+          claimedAt: new Date().toISOString(),
+        });
+        commands.push(command);
+      }
+      return res.json({ success: true, commands });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command polling failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not poll Android device commands.' : (error?.message || 'Device polling failed.') });
+    }
+  });
+
+  app.post('/api/devices/result', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const deviceId = String(req.body?.deviceId || '').trim();
+      const commandId = String(req.body?.commandId || '').trim();
+      const statusValue = String(req.body?.status || '').trim().toUpperCase();
+      if (!safeDeviceId(deviceId) || !safeDeviceId(commandId)) return res.status(400).json({ error: 'Invalid device or command ID.' });
+      if (!['COMPLETED', 'SENT_UNVERIFIED', 'FAILED', 'EXPIRED'].includes(statusValue)) return res.status(400).json({ error: 'Unsupported Android command result status.' });
+
+      const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
+      if (!raw) return res.status(404).json({ error: 'Command was not found.' });
+      const command = decodeFirestoreFields(raw.fields || {});
+      if (command.targetDeviceId !== deviceId) return res.status(403).json({ error: 'This command belongs to another device.' });
+      if (!['RUNNING', 'PENDING', 'CREATED'].includes(String(command.status || ''))) return res.status(409).json({ error: 'This command is no longer awaiting a result.' });
+
+      const result = req.body?.result && typeof req.body.result === 'object' ? req.body.result : {};
+      await patchFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)), {
+        status: statusValue,
+        result: {
+          success: result.success === true,
+          verified: result.verified === true,
+          outputText: String(result.outputText || '').slice(0, 4000),
+          error: String(result.error || '').slice(0, 1000),
+          durationMs: Math.max(0, Math.min(Number(result.durationMs) || 0, 120000)),
+          ...(typeof result.imageDataUrl === 'string' && result.imageDataUrl.length <= 650000
+            ? { imageDataUrl: result.imageDataUrl }
+            : {}),
+        },
+        completedAt: new Date().toISOString(),
+      });
+      return res.json({ success: true, commandId, status: statusValue });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command result write failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not save the Android command result.' : (error?.message || 'Command result failed.') });
+    }
+  });
+
+  app.get('/api/devices/commands/:commandId', async (req, res) => {
+    try {
+      const actor = await verifyAuthenticatedHubMindRequest(req);
+      const commandId = String(req.params.commandId || '').trim();
+      if (!safeDeviceId(commandId)) return res.status(400).json({ error: 'Invalid command ID.' });
+      const raw: any = await readFirestoreDoc(userCommandPath(actor.uid, '/' + encodeURIComponent(commandId)));
+      if (!raw) return res.status(404).json({ error: 'Command was not found.' });
+      const command = { id: commandId, ...decodeFirestoreFields(raw.fields || {}) };
+      return res.json({ success: true, command });
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.error('[Devices] Command status lookup failed:', error?.message || error);
+      return res.status(status).json({ error: status === 500 ? 'Could not read Android command status.' : (error?.message || 'Command status lookup failed.') });
+    }
+  });
+
   const liveTokenRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const liveTokenIdentityCache = new Map<string, { localId: string; expiresAt: number }>();
   app.post(["/api/live-token", "/live-token"], async (req, res) => {
     const clientKey = String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 160);
     const now = Date.now();
@@ -215,19 +560,37 @@ async function startServer() {
       const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
       if (!idToken || idToken.length > 10000) return res.status(401).json({ error: "Authentication required. Please sign in again." });
 
-      const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
-      if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
+      const tokenFingerprint = createHash("sha256").update(idToken).digest("hex");
+      const cachedIdentity = liveTokenIdentityCache.get(tokenFingerprint);
+      let verifiedUser: { localId: string } | null = cachedIdentity && cachedIdentity.expiresAt > now
+        ? { localId: cachedIdentity.localId }
+        : null;
 
-      // Ask Firebase Auth to validate the ID token. Never trust a bearer token
-      // merely because the client supplied it.
-      const identityResponse = await fetch(
-        "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
-      );
-      if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
-      const identityData = await identityResponse.json() as any;
-      const verifiedUser = identityData?.users?.[0];
-      if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+      // Validate each Firebase ID token with Firebase Auth, but avoid repeating
+      // that network round-trip when a just-verified token is immediately used
+      // to reconnect a Live session. The short cache is keyed by a one-way hash.
+      if (!verifiedUser) {
+        const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+        if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
+
+        const identityResponse = await fetch(
+          "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
+        );
+        if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
+        const identityData = await identityResponse.json() as any;
+        const identity = identityData?.users?.[0];
+        if (!identity?.localId || identity.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+
+        verifiedUser = { localId: identity.localId };
+        liveTokenIdentityCache.set(tokenFingerprint, { localId: identity.localId, expiresAt: now + 30_000 });
+      }
+
+      if (liveTokenIdentityCache.size > 5000) {
+        for (const [key, value] of liveTokenIdentityCache) {
+          if (value.expiresAt <= now) liveTokenIdentityCache.delete(key);
+        }
+      }
 
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured on the server." });
@@ -1484,6 +1847,38 @@ async function startServer() {
           name: "chrome_capture_screenshot",
           description: "Capture a compressed thumbnail preview of the active visible Chrome tab. The preview is shown to the user; use page text or screen OCR for actual content analysis. Requires Full Control.",
           parameters: { type: "OBJECT", properties: { tabId: { type: "NUMBER" } } }
+        },
+        {
+          name: "dispatch_device_command",
+          description: "Perform one explicitly requested action on the selected, registered Hub-Mind Windows laptop or Android phone. The device must be online. Windows requires local Jess Full Control to be active. Never retry uncertain actions automatically.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              actionType: { type: "STRING", enum: [
+                "TAP","DOUBLE_TAP","LONG_PRESS","SWIPE","SCROLL","TYPE_TEXT","CLEAR_TEXT","OPEN_APP","GET_INSTALLED_APPS","GET_SCREEN_HIERARCHY","SET_CLIPBOARD","GET_CLIPBOARD","NAVIGATE_BACK","GO_HOME","OPEN_RECENTS","OPEN_NOTIFICATIONS","OPEN_QUICK_SETTINGS",
+                "list_windows","manage_windows","control_mouse","drag_windows_mouse","type_windows_text","press_windows_keys","control_system_volume","control_screen_brightness","take_windows_screenshot","find_windows_ui_element","list_windows_ui_elements","invoke_windows_ui_element","set_windows_ui_value","read_windows_screen","open_local_windows_path","launch_windows_application","get_windows_time","get_windows_system_info","chrome_bridge_status","chrome_list_tabs","chrome_open_tab","chrome_close_tab","chrome_activate_tab","chrome_navigate_tab","chrome_reload_tab","chrome_read_page","chrome_find_element","chrome_click_element","chrome_fill_field","chrome_scroll","chrome_capture_screenshot","manage_windows_files","manage_windows_clipboard","control_windows_power","scan_windows_storage","clean_windows_storage_candidates","start_windows_auto_scroll","stop_windows_auto_scroll","show_hub_mind_workspace","jess_stop","desktop_run_readonly_command","desktop_open_website"
+              ]},
+              targetDeviceId: { type: "STRING", description: "Optional exact target device ID; otherwise use the selected workspace target." },
+              userExplicitlyRequested: { type: "BOOLEAN", description: "Must be true only for a direct device-action request from the user in this turn." },
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  x:{type:"NUMBER"}, y:{type:"NUMBER"}, startX:{type:"NUMBER"}, startY:{type:"NUMBER"}, endX:{type:"NUMBER"}, endY:{type:"NUMBER"},
+                  text:{type:"STRING"}, appName:{type:"STRING"}, packageName:{type:"STRING"}, action:{type:"STRING"}, value:{type:"STRING"},
+                  durationMs:{type:"NUMBER"}, title:{type:"STRING"}, handle:{type:"STRING"}, width:{type:"NUMBER"}, height:{type:"NUMBER"},
+                  position:{type:"STRING"}, monitorId:{type:"STRING"}, delta:{type:"NUMBER"}, keys:{type:"STRING"}, name:{type:"STRING"},
+                  index:{type:"NUMBER"}, expectedName:{type:"STRING"}, path:{type:"STRING"}, destination:{type:"STRING"}, content:{type:"STRING"},
+                  pattern:{type:"STRING"}, offset:{type:"NUMBER"}, limit:{type:"NUMBER"}, root:{type:"STRING"},
+                  largeThresholdMB:{type:"NUMBER"}, inactiveDays:{type:"NUMBER"}, maxSeconds:{type:"NUMBER"}, maxFiles:{type:"NUMBER"},
+                  detectDuplicates:{type:"BOOLEAN"}, scanId:{type:"STRING"}, candidateIds:{type:"ARRAY",items:{type:"STRING"}},
+                  monitorName:{type:"STRING"}, detail:{type:"STRING"}, url:{type:"STRING"}, selector:{type:"STRING"},
+                  direction:{type:"STRING",enum:["up","down"]},
+                  speed:{type:"NUMBER"}, commandName:{type:"STRING",enum:["ipconfig","systemInfo","runningProcesses"]}
+                }
+              }
+            },
+            required: ["actionType","userExplicitlyRequested"]
+          }
         },
         {
           name: "end_session",

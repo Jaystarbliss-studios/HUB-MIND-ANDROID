@@ -72,7 +72,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       # The current lockfile is missing four declared devDependencies; npm ci would fail before tests.
       # Use npm install until the repository lockfile is regenerated and committed.
       - run: npm install --no-audit --no-fund

@@ -48,10 +48,26 @@ fun DevicesScreen(
                         color = Slate50
                     )
                     Text(
-                        text = "Authorized nodes in the Jaystarbliss Studios device mesh",
+                        text = "Choose which registered phone or computer Jess should work with.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Slate400
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${state.devices.size} registered device(s)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Slate500
+                        )
+                        TextButton(onClick = viewModel::refreshDevices) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Refresh")
+                        }
+                    }
                 }
             }
         }
@@ -83,14 +99,44 @@ fun DevicesScreen(
                 }
             }
 
-            items(state.devices) { device ->
-                DeviceCard(
-                    device = device,
-                    isSelectedTarget = state.currentTargetDevice?.deviceId == device.deviceId,
-                    onSelect = { viewModel.selectDevice(device.deviceId) },
-                    onPing = { viewModel.pingDevice(device.deviceId) },
-                    isPinging = state.isPinging
-                )
+            if (state.devices.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Slate900,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Filled.DevicesOther, contentDescription = null, tint = Teal400, modifier = Modifier.size(30.dp))
+                            Text("No devices registered yet", color = Slate100, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Sign in to Hub-Mind on your Windows laptop or another phone, then enable its device session. Connected devices will appear here automatically.",
+                                color = Slate400,
+                                style = MaterialTheme.typography.bodySmall,
+                                lineHeight = 18.sp
+                            )
+                            TextButton(onClick = viewModel::refreshDevices) {
+                                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Try again")
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(state.devices, key = { it.deviceId }) { device ->
+                    DeviceCard(
+                        device = device,
+                        isSelectedTarget = state.currentTargetDevice?.deviceId == device.deviceId,
+                        onSelect = { viewModel.selectDevice(device.deviceId) },
+                        onPing = { viewModel.pingDevice(device.deviceId) },
+                        isPinging = state.isPinging
+                    )
+                }
             }
 
             item {

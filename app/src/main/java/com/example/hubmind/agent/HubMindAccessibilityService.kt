@@ -70,7 +70,7 @@ class HubMindAccessibilityService : AccessibilityService() {
         )
     }
 
-    fun performTapAt(x: Float, y: Float, durationMs: Long = 100, onComplete: (Boolean) -> Unit = {}) {
+    fun performTapAt(x: Float, y: Float, durationMs: Long = 100, onComplete: (Boolean) -> Unit = {}): Boolean {
         val path = Path().apply {
             moveTo(x, y)
         }
@@ -78,7 +78,7 @@ class HubMindAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
-        dispatchGesture(gesture, object : GestureResultCallback() {
+        return dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 onComplete(true)
             }
@@ -94,7 +94,7 @@ class HubMindAccessibilityService : AccessibilityService() {
         endX: Float, endY: Float,
         durationMs: Long = 300,
         onComplete: (Boolean) -> Unit = {}
-    ) {
+    ): Boolean {
         val path = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
@@ -103,7 +103,7 @@ class HubMindAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
-        dispatchGesture(gesture, object : GestureResultCallback() {
+        return dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 onComplete(true)
             }
@@ -117,9 +117,12 @@ class HubMindAccessibilityService : AccessibilityService() {
     fun performTextSetOnFocused(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        // Never type into a password field through remote device control.
+        if (!focus.isEditable || focus.isPassword) return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val accepted = focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        return accepted && focus.text?.toString() == text
     }
 }

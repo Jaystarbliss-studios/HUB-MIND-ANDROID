@@ -40,6 +40,35 @@ service cloud.firestore {
       match /dailyReports/{id} { allow read, write: if self(userId) || admin(); }
       match /weeklyReports/{id} { allow read, write: if self(userId) || admin(); }
       match /jessTasks/{id} { allow read, write: if self(userId) || admin(); }
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if self(userId) || admin();
+      }
+      match /deviceCommands/{commandId} {
+        allow read: if self(userId) || admin();
+        allow create: if member()
+          && self(userId)
+          && request.resource.data.issuingUserId == userId
+          && request.resource.data.targetDeviceId is string
+          && request.resource.data.actionType in [
+            'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL',
+            'TYPE_TEXT', 'CLEAR_TEXT', 'OPEN_APP', 'GET_INSTALLED_APPS',
+            'GET_SCREEN_HIERARCHY', 'SET_CLIPBOARD',
+            'GET_CLIPBOARD', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS',
+            'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS'
+          ]
+          && request.resource.data.status == 'CREATED'
+          && request.resource.data.parameters is map;
+        allow update: if self(userId)
+          && resource.data.issuingUserId == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'startedAt', 'completedAt', 'updatedAt',
+            'result', 'error', 'verified'
+          ])
+          && request.resource.data.status in [
+            'EXECUTING', 'COMPLETED', 'SENT_UNVERIFIED', 'FAILED', 'EXPIRED'
+          ];
+        allow delete: if false;
+      }
     }
     match /invitations/{id} {
       allow get: if admin() || (signedIn() && resource.data.email == request.auth.token.email);

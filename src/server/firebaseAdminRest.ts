@@ -71,7 +71,15 @@ export async function firebaseAdminRequest(path: string, init: RequestInit = {})
 
 export function firestoreDocumentUrl(path: string) {
   const projectId = firebaseAdminProjectId();
-  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents/' + path;
+  // Keep Admin REST calls on the same named database as the web Firebase client.
+  // The workspace defaults to its dedicated Hub-Mind database, not "(default)".
+  const databaseId = process.env.FIRESTORE_DATABASE_ID
+    || process.env.VITE_FIRESTORE_DATABASE_ID
+    || 'ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430';
+  return 'https://firestore.googleapis.com/v1/projects/' +
+    encodeURIComponent(projectId) +
+    '/databases/' + encodeURIComponent(databaseId) +
+    '/documents/' + path;
 }
 
 export function firebaseAuthAdminUrl(operation: 'update' | 'delete') {
@@ -93,14 +101,34 @@ export function decodeFirestoreFields(fields: Record<string, any> = {}) {
   return result;
 }
 
+function encodeFirestoreValue(item: any): any {
+  if (item === null) return { nullValue: null };
+  if (typeof item === 'string') return { stringValue: item };
+  if (typeof item === 'boolean') return { booleanValue: item };
+  if (typeof item === 'number' && Number.isInteger(item)) return { integerValue: String(item) };
+  if (typeof item === 'number' && Number.isFinite(item)) return { doubleValue: item };
+  if (Array.isArray(item)) {
+    return {
+      arrayValue: {
+        values: item.map(value => encodeFirestoreValue(value)),
+      },
+    };
+  }
+  if (item && typeof item === 'object') {
+    return {
+      mapValue: {
+        fields: encodeFirestoreFields(item),
+      },
+    };
+  }
+  return { nullValue: null };
+}
+
 export function encodeFirestoreFields(value: Record<string, any>) {
   const fields: Record<string, any> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === 'string') fields[key] = { stringValue: item };
-    else if (typeof item === 'boolean') fields[key] = { booleanValue: item };
-    else if (typeof item === 'number' && Number.isInteger(item)) fields[key] = { integerValue: String(item) };
-    else if (typeof item === 'number') fields[key] = { doubleValue: item };
-    else if (item === null) fields[key] = { nullValue: null };
+  for (const [key, item] of Object.entries(value || {})) {
+    if (item === undefined) continue;
+    fields[key] = encodeFirestoreValue(item);
   }
   return fields;
 }

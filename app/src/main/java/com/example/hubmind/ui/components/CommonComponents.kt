@@ -1,5 +1,6 @@
 package com.example.hubmind.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,9 +18,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.hubmind.data.model.DeviceNode
 import com.example.hubmind.data.model.DeviceStatus
 import com.example.hubmind.ui.theme.*
@@ -30,7 +33,7 @@ enum class HubMindNavDestination(
     val unselectedIcon: ImageVector,
     val testTag: String
 ) {
-    JESS("Jess", Icons.Filled.SmartToy, Icons.Outlined.SmartToy, "nav_jess_tab"),
+    WORKSPACE("Workspace", Icons.Filled.Home, Icons.Outlined.Home, "nav_workspace_tab"),
     DEVICES("Devices", Icons.Filled.Devices, Icons.Outlined.Devices, "nav_devices_tab"),
     ACTIVITY("Activity", Icons.Filled.History, Icons.Outlined.History, "nav_activity_tab"),
     SETTINGS("Settings", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings_tab")
@@ -56,7 +59,6 @@ fun HubMindTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Brand & Logo
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -69,11 +71,10 @@ fun HubMindTopBar(
                         .border(1.dp, Teal500.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Hub,
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_hubmind_logo),
                         contentDescription = "Hub-Mind Logo",
-                        tint = Teal400,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(25.dp)
                     )
                 }
                 Column {
@@ -91,7 +92,6 @@ fun HubMindTopBar(
                 }
             }
 
-            // Target Device Indicator Chip
             Surface(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
@@ -193,20 +193,19 @@ fun StatusBadge(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(5.dp)
+                    .size(6.dp)
                     .clip(CircleShape)
                     .background(textColor)
             )
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelSmall,
                 color = textColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp
             )
         }
     }

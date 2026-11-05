@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('hubMindDesktop', Object.freeze({
   platform: process.platform, isDesktopApp: true,
+  getDeviceId: () => ipcRenderer.invoke('hubmind:get-device-id'),
+  setDeviceSession: (userId, idToken) => ipcRenderer.invoke('hubmind:set-device-session', userId, idToken),
+  clearDeviceSession: () => ipcRenderer.invoke('hubmind:clear-device-session'),
   startFullControl: (userId) => ipcRenderer.invoke('hubmind:full-control-start', userId),
   setJessPreferences: (prefs, userId) => ipcRenderer.invoke('hubmind:jess-preferences-set', prefs, userId),
   setJessPetState: (state) => ipcRenderer.invoke('hubmind:pet-set-state', state),

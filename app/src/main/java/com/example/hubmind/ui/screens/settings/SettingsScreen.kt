@@ -1,5 +1,10 @@
 package com.example.hubmind.ui.screens.settings
 
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -10,13 +15,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +44,17 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var overlayGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                overlayGranted = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -164,6 +187,40 @@ fun SettingsScreen(
                     }
 
                     Divider(color = Slate800, thickness = 1.dp)
+
+                    PermissionRow(
+                        icon = Icons.Filled.Subtitles,
+                        title = "Jess On-Screen Transcript",
+                        subtitle = "Show brief, transparent Jess and user captions above other apps. The overlay does not capture taps.",
+                        isGranted = overlayGranted
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= 23 && !overlayGranted) {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                )
+                            }
+                        },
+                        enabled = Build.VERSION.SDK_INT >= 23 && !overlayGranted,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (overlayGranted) Teal500 else Slate700)
+                    ) {
+                        Text(
+                            if (overlayGranted) "Transcript overlay enabled" else "Enable transcript over other apps",
+                            color = if (overlayGranted) Teal400 else Slate200,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Text(
+                        "Android requires your permission before Hub-Mind can display captions while you are using another app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Slate400
+                    )
 
                     // Advanced Control Provider Status (Shizuku / ADB)
                     PermissionRow(

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { LiveAudioClient, JessState } from '../services/liveAudioClient';
@@ -37,13 +37,18 @@ import {
 
 const POSITION_KEY = 'hubmind.jess.position.v2';
 const DESKTOP_TRANSCRIPT_KEY = 'hubmind.jess.desktopTranscript.v1';
+const ACTIVE_DEVICE_TARGET_KEY = 'hubmind.jess.activeTargetDeviceId.v1';
+type JessDeviceTarget = { id: string; name: string; platform: string; status: string; fullControlActive: boolean; isCurrentDevice: boolean; capabilities: string[]; lastSeenAt: number };
 function publishJessTranscript(id: string, speaker: 'user' | 'jess', text: string) {
+  const entry = { id, speaker, text: String(text).slice(0, 12000), at: Date.now() };
+  // Native Android transcript is independent of browser storage, so it still
+  // receives captions when WebView localStorage is unavailable or quota-limited.
+  try { (window as any).HubMindNative?.onJessTranscript?.(speaker, entry.text); } catch {}
   try {
     const raw = localStorage.getItem(DESKTOP_TRANSCRIPT_KEY);
     const existing = raw ? JSON.parse(raw) : [];
     const entries = Array.isArray(existing) ? existing.filter((item: any) => item && typeof item.id === 'string') : [];
     const index = entries.findIndex((item: any) => item.id === id);
-    const entry = { id, speaker, text: String(text).slice(0, 12000), at: Date.now() };
     if (index >= 0) entries[index] = entry; else entries.push(entry);
     localStorage.setItem(DESKTOP_TRANSCRIPT_KEY, JSON.stringify(entries.slice(-40)));
   } catch { /* Transcript persistence must never interrupt the live voice session. */ }
@@ -169,6 +174,25 @@ function highRiskJessConfirmation(toolName: string, args: any): string | null {
   if (name === 'control_windows_power' && ['shutdown','restart'].includes(action)) {
     return 'schedule Windows ' + action + ' in 15 seconds; the action can be cancelled with shutdown /a before it begins';
   }
+  if (name === 'dispatch_device_command') {
+    const deviceAction = String(args?.actionType || '');
+    const params = args?.parameters && typeof args.parameters === 'object' ? args.parameters : {};
+    if (deviceAction === 'manage_windows_files' &&
+        ['delete','remove','recycle','write','move','rename','copy'].includes(String(params.action || '').toLowerCase())) {
+      return 'make a file-system change on the selected Windows laptop: ' +
+        String(params.action || '').toLowerCase() + ' ' + String(params.path || '').slice(0, 180);
+    }
+    if (deviceAction === 'clean_windows_storage_candidates') {
+      return 'move selected Windows storage-cleanup candidates to the Recycle Bin';
+    }
+    if (deviceAction === 'control_windows_power' &&
+        ['shutdown','restart'].includes(String(params.action || '').toLowerCase())) {
+      return 'schedule Windows ' + String(params.action).toLowerCase() + ' on the selected laptop';
+    }
+    if (deviceAction === 'manage_windows' && String(params.action || '').toLowerCase() === 'close_window') {
+      return 'close a Windows application window on the selected laptop';
+    }
+  }
   if (name === 'run_windows_command_native') {
     const command = String(args?.command || '').trim();
     if (/\b(remove-item|remove-itemproperty|clear-content|format(?:-volume|-disk)?|clear-disk|diskpart|bcdedit|shutdown|restart-computer|stop-computer|set-executionpolicy|reg\s+(?:add|delete|import)|cipher\s+\/w|move-item|copy-item|rename-item|invoke-expression|iex)\b/i.test(command) ||
@@ -203,6 +227,76 @@ interface JessPetVoiceActivationRequest {
 
 export function JessFloatingAssistant() {
   const { user, profile, updatePreferredName } = useAuth();
+  const [registeredDevices, setRegisteredDevices] = useState<JessDeviceTarget[]>([]);
+  const [activeTargetDeviceId, setActiveTargetDeviceId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch { return ''; }
+  });
+  const activeTargetDeviceRef = useRef(activeTargetDeviceId);
+  useEffect(() => { activeTargetDeviceRef.current = activeTargetDeviceId; }, [activeTargetDeviceId]);
+
+  const persistActiveDeviceTarget = useCallback((deviceId: string) => {
+    setActiveTargetDeviceId(deviceId);
+    activeTargetDeviceRef.current = deviceId;
+    try { localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, deviceId); } catch {}
+    try { (window as any).HubMindNative?.onTargetDeviceSelected?.(deviceId); } catch {}
+    if (profile?.id) {
+      void setDoc(
+        doc(db, 'users', profile.id, 'private', 'jessSettings'),
+        { activeTargetDeviceId: deviceId, activeTargetDeviceUpdatedAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(error => console.warn('[Jess] Could not sync the active device target:', error));
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) { setRegisteredDevices([]); return; }
+    return onSnapshot(collection(db, 'users', profile.id, 'devices'), snapshot => {
+      const nativeBridge = (window as any).HubMindNative;
+      const desktopBridge = (window as any).hubMindDesktop;
+      const nativeId = String(nativeBridge?.getAndroidDeviceId?.() || '');
+      const desktopIdPromise = nativeId || typeof desktopBridge?.getDeviceId !== 'function'
+        ? Promise.resolve('')
+        : Promise.resolve(desktopBridge.getDeviceId()).then((value: unknown) => String(value || '')).catch(() => '');
+      void desktopIdPromise.then(desktopId => {
+        const localDeviceId = nativeId || desktopId;
+        const now = Date.now();
+        const devices = snapshot.docs.map(entry => {
+          const data = entry.data() as any;
+          const lastSeenAt = typeof data.lastSeenAt === 'number'
+            ? data.lastSeenAt
+            : Date.parse(String(data.lastSeenAt || '')) || 0;
+          const fresh = lastSeenAt > 0 && now - lastSeenAt < 90_000;
+          return {
+            id: entry.id,
+            name: String(data.deviceName || entry.id),
+            platform: String(data.platform || 'WEB').toUpperCase(),
+            status: data.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : (data.status === 'ONLINE' && fresh ? 'ONLINE' : 'OFFLINE'),
+            fullControlActive: data.fullControlActive === true,
+            isCurrentDevice: entry.id === localDeviceId,
+            capabilities: Array.isArray(data.capabilities) ? data.capabilities.map((item: any) => String(item)) : [],
+            lastSeenAt,
+          } as JessDeviceTarget;
+        }).sort((a,b) => Number(b.isCurrentDevice) - Number(a.isCurrentDevice) || Number(b.status === 'ONLINE') - Number(a.status === 'ONLINE') || a.name.localeCompare(b.name));
+        setRegisteredDevices(devices);
+        const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
+        if (!selectedStillExists) {
+          const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')
+            || devices.find(device => device.status === 'ONLINE');
+          if (next) persistActiveDeviceTarget(next.id);
+        }
+      });
+    }, error => console.warn('[Jess] Could not load the shared device registry:', error));
+  }, [profile?.id, persistActiveDeviceTarget]);
+
+  useEffect(() => {
+    const onNativeTargetChanged = () => {
+      let id = '';
+      try { id = localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch {}
+      if (id && id !== activeTargetDeviceRef.current) persistActiveDeviceTarget(id);
+    };
+    window.addEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+    return () => window.removeEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+  }, [persistActiveDeviceTarget]);
   const jessPreferencesRef = useRef({
     permissionMode: 'ask' as 'ask' | 'allow-routine' | 'allow-everything' | 'always-allow',
     fullControlEnabled: false,
@@ -217,12 +311,19 @@ export function JessFloatingAssistant() {
     allowShellCommands: true,
     moodAdaptiveTone: true,
     conversationStyle: 'adaptive' as 'adaptive' | 'friendly' | 'professional' | 'concise',
+    activeTargetDeviceId: '',
   });
   useEffect(() => {
     if (!profile?.id) return;
     return onSnapshot(doc(db, 'users', profile.id, 'private', 'jessSettings'), snapshot => {
       const prefs = { ...jessPreferencesRef.current, ...(snapshot.exists() ? snapshot.data() : {}) };
       jessPreferencesRef.current = prefs;
+      if (typeof prefs.activeTargetDeviceId === 'string' && prefs.activeTargetDeviceId !== activeTargetDeviceRef.current) {
+        activeTargetDeviceRef.current = prefs.activeTargetDeviceId;
+        setActiveTargetDeviceId(prefs.activeTargetDeviceId);
+        try { localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, prefs.activeTargetDeviceId); } catch {}
+        try { (window as any).HubMindNative?.onTargetDeviceSelected?.(prefs.activeTargetDeviceId); } catch {}
+      }
       try { localStorage.setItem('hubmind.jess.preferences', JSON.stringify(prefs)); } catch {}
       void (window as any).hubMindDesktop?.setJessPreferences?.(prefs, profile.id).catch(() => {});
     }, error => console.warn('[Jess] Could not load user preferences:', error));
@@ -243,7 +344,13 @@ export function JessFloatingAssistant() {
   const [remoteJessOwner, setRemoteJessOwner] = useState<JessSessionOwner | null>(null);
   const sessionEndingRef = useRef(false);
   const screenControlRef = useRef<{ timer: number | null; running: boolean; speed: number; direction: number; axis: 'x' | 'y' }>({ timer: null, running: false, speed: 3, direction: 1, axis: 'y' });
-  const screenShareRef = useRef<{ stream: MediaStream | null; timer: number | null; video: HTMLVideoElement | null; nativePlugin: any; nativeListener: any }>({ stream: null, timer: null, video: null, nativePlugin: null, nativeListener: null });
+  const screenShareRef = useRef<{ stream: MediaStream | null; timer: number | null; video: HTMLVideoElement | null; nativePlugin: any; nativeListener: any; nativeScreenSharing: boolean }>({ stream: null, timer: null, video: null, nativePlugin: null, nativeListener: null, nativeScreenSharing: false });
+  const nativeJessMicrophoneActiveRef = useRef(false);
+  const setNativeJessMicrophoneActive = useCallback((active: boolean) => {
+    if (nativeJessMicrophoneActiveRef.current === active) return;
+    nativeJessMicrophoneActiveRef.current = active;
+    try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(active); } catch {}
+  }, []);
   const [screenSharingActive, setScreenSharingActive] = useState(false);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioInputId, setSelectedAudioInputId] = useState(() => { try { return localStorage.getItem('hubmind.jess.audioInputDeviceId') || ''; } catch { return ''; } });
@@ -364,6 +471,10 @@ export function JessFloatingAssistant() {
     share.nativeListener = null;
     if (share.nativePlugin?.stopSharing) await share.nativePlugin.stopSharing().catch(() => undefined);
     share.nativePlugin = null;
+    if (share.nativeScreenSharing) {
+      try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+      share.nativeScreenSharing = false;
+    }
     setScreenSharingActive(false);
     if (announce) setSpeechState({ text: 'Screen sharing has stopped.', speaker: 'jess', visible: true });
   }, []);
@@ -372,6 +483,13 @@ export function JessFloatingAssistant() {
     setScreenSharePrompt(false);
     const share = screenShareRef.current;
     try {
+      const nativeAndroid = (window as any).HubMindNative;
+      if (/Android/i.test(navigator.userAgent) && typeof nativeAndroid?.requestScreenCapture === 'function') {
+        share.nativeScreenSharing = true;
+        nativeAndroid.requestScreenCapture();
+        setSpeechState({ text: 'Approve Android screen sharing in the system dialog. Jess will receive a fresh screen snapshot about once per second while sharing is active.', speaker: 'jess', visible: true });
+        return;
+      }
       if (!isJessInstalledApp() || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
         throw new Error('This screen-sharing option is only available in the installed desktop app. Mobile cross-app sharing requires the native app.');
       }
@@ -425,7 +543,38 @@ export function JessFloatingAssistant() {
       share.video = null;
       setSpeechState({ text: error?.message || 'Screen sharing was cancelled or permission was denied.', speaker: 'jess', visible: true });
     }
-  }, [stopScreenSharing]);
+  }, [stopScreenSharing, setNativeJessMicrophoneActive]);
+
+  useEffect(() => {
+    const nativeAndroid = (window as any).HubMindNative;
+    if (!nativeAndroid) return;
+    const handleNativeScreenShare = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const share = screenShareRef.current;
+      if (detail.type === 'started') {
+        share.nativeScreenSharing = true;
+        setScreenSharingActive(true);
+        clientRef.current?.sendText('SCREEN SHARE STATUS: Android screen sharing is active. Jess will receive a new, bounded JPEG snapshot about once per second. Frames are snapshots, not continuous video; only describe pixels present in a received frame.');
+        setSpeechState({ text: 'Screen sharing is active. Jess can now see periodic snapshots of your Android screen. Say “stop screen sharing” when you are done.', speaker: 'jess', visible: true });
+      } else if (detail.type === 'frame' && typeof detail.dataUrl === 'string' && share.nativeScreenSharing) {
+        const delivered = clientRef.current?.sendScreenFrame(detail.dataUrl) === true;
+        if (!delivered) {
+          setSpeechState({ text: 'Android capture is active, but Jess is not receiving screen frames. Check that the Jess Live voice session is connected.', speaker: 'jess', visible: true });
+        }
+      } else if (detail.type === 'stopped') {
+        share.nativeScreenSharing = false;
+        setScreenSharingActive(false);
+      } else if (detail.type === 'error') {
+        share.nativeScreenSharing = false;
+        setScreenSharingActive(false);
+        setSpeechState({ text: String(detail.error || 'Android screen sharing could not start.'), speaker: 'jess', visible: true });
+      } else if (detail.type === 'microphone-error') {
+        setSpeechState({ text: String(detail.error || 'Android could not keep Jess voice active in the background.'), speaker: 'jess', visible: true });
+      }
+    };
+    window.addEventListener('hubmind-native-screen-share', handleNativeScreenShare as EventListener);
+    return () => window.removeEventListener('hubmind-native-screen-share', handleNativeScreenShare as EventListener);
+  }, []);
 
   const jessSpeechAccumulatorRef = useRef<string>('');
   const jessTranscriptTurnIdRef = useRef<string | null>(null);
@@ -530,6 +679,11 @@ export function JessFloatingAssistant() {
       share.nativeListener = null;
       if (share.nativePlugin?.stopSharing) void share.nativePlugin.stopSharing().catch(() => undefined);
       share.nativePlugin = null;
+      if (share.nativeScreenSharing) {
+        try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+        share.nativeScreenSharing = false;
+      }
+      setNativeJessMicrophoneActive(false);
       void clientRef.current?.disconnect();
       clientRef.current = null;
       const lease = sessionLeaseRef.current;
@@ -537,7 +691,7 @@ export function JessFloatingAssistant() {
       if (lease?.timer !== null && lease?.timer !== undefined) window.clearInterval(lease.timer);
       if (lease) void releaseJessSession(lease.userId, lease.sessionId).catch(error => console.warn('[Jess] Could not release session on unmount:', error));
     };
-  }, []);
+  }, [setNativeJessMicrophoneActive]);
 
   const scheduleFade = useCallback((delayMs = 5000) => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -552,6 +706,7 @@ export function JessFloatingAssistant() {
     sessionLeaseRef.current = null;
     if (lease?.timer !== null && lease?.timer !== undefined) window.clearInterval(lease.timer);
     if (lease) void releaseJessSession(lease.userId, lease.sessionId).catch(error => console.warn('[Jess] Could not release cross-client session:', error));
+    setNativeJessMicrophoneActive(false);
     await stopScreenSharing(false);
     await clientRef.current?.disconnect();
     clientRef.current = null;
@@ -617,7 +772,14 @@ export function JessFloatingAssistant() {
 
     const preferredInputDeviceId = (() => { try { return localStorage.getItem('hubmind.jess.audioInputDeviceId') || selectedAudioInputId; } catch { return selectedAudioInputId; } })();
     const client = new LiveAudioClient({
-      onStatusChange: setConnection,
+      onStatusChange: status => {
+        setConnection(status);
+        // Only promote Android's microphone foreground-service type after Live
+        // has actually connected. This avoids starting a foreground service for
+        // an idle/disconnected WebView while preserving an active session in background.
+        if (status === 'connected') setNativeJessMicrophoneActive(true);
+        else if (status === 'disconnected' || status === 'error') setNativeJessMicrophoneActive(false);
+      },
       onJessStateChange: setState,
       onJessTranscript: (text) => {
         if (!text) return;
@@ -658,6 +820,14 @@ export function JessFloatingAssistant() {
         let toolArgs = fc.args;
         if (typeof toolArgs === 'string') {
           try { toolArgs = JSON.parse(toolArgs); } catch { toolArgs = {}; }
+        }
+        if (
+          toolArgs && typeof toolArgs === 'object' &&
+          !toolArgs.targetDeviceId &&
+          ['dispatch_android_device_command', 'dispatch_device_command'].includes(fc.name) &&
+          activeTargetDeviceRef.current
+        ) {
+          toolArgs = { ...toolArgs, targetDeviceId: activeTargetDeviceRef.current };
         }
         const fingerprint = `${fc.name}:${JSON.stringify(toolArgs || {})}`;
         const previousCalls = toolLoopRef.current.fingerprints.filter(value => value === fingerprint).length;
@@ -753,11 +923,19 @@ export function JessFloatingAssistant() {
             share.nativeListener = null;
             if (share.nativePlugin?.stopSharing) await share.nativePlugin.stopSharing().catch(() => undefined);
             share.nativePlugin = null;
+            if (share.nativeScreenSharing) {
+              try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+              share.nativeScreenSharing = false;
+            }
           };
           if (p.action === 'stop') {
             await stopShare();
             setScreenSharingActive(false);
             result.result.message = 'Screen sharing has stopped.';
+          } else if (/Android/i.test(navigator.userAgent) && typeof (window as any).HubMindNative?.requestScreenCapture === 'function') {
+            await stopShare();
+            setScreenSharePrompt(true);
+            result.result.message = 'I opened the Android screen-sharing confirmation. Tap “Share screen” and approve the system capture permission so I can see your phone screen.';
           } else if (!isJessInstalledApp()) {
             result.result = { success: false, error: 'Screen sharing is available only in the installed Hub-Mind app, not in a normal browser tab.' };
           } else {
@@ -887,6 +1065,19 @@ export function JessFloatingAssistant() {
           result.result.success = delivered;
         }
 
+        if (fc.name === 'dispatch_device_command' && typeof result.result?.imageDataUrl === 'string') {
+          const delivered = clientRef.current?.sendScreenFrame(result.result.imageDataUrl) === true;
+          result.result.screenshotDeliveredToJess = delivered;
+          if (!delivered) {
+            result.result.message = String(result.result.message || 'The remote device captured a screenshot.') +
+              ' The screenshot was not delivered to the current Jess Live session.';
+          } else {
+            result.result.message = String(result.result.message || 'The remote device captured a screenshot.') +
+              ' The captured image was sent to Jess for visual analysis.';
+          }
+          delete result.result.imageDataUrl;
+        }
+
         clientRef.current?.sendFunctionResponse({ name: fc.name, id: fc.id, response: result.result });
 
         if (result.actionPayload?.type === 'navigate' && result.actionPayload.path) {
@@ -930,7 +1121,7 @@ export function JessFloatingAssistant() {
         }
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
         const stopShareCommand = /\b(stop|end|turn off|finish|cancel)\s+(?:the\s+)?(?:screen\s*sharing|screen share|sharing my screen)\b/i.test(text);
-        if (stopShareCommand && (screenShareRef.current.stream || screenShareRef.current.nativePlugin || screenShareRef.current.timer !== null)) {
+        if (stopShareCommand && (screenShareRef.current.stream || screenShareRef.current.nativePlugin || screenShareRef.current.nativeScreenSharing || screenShareRef.current.timer !== null)) {
           void stopScreenSharing(true);
         }
         jessSpeechAccumulatorRef.current = '';
@@ -1488,6 +1679,26 @@ export function JessFloatingAssistant() {
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">
+            <label htmlFor="jess-device-target" className="mb-1.5 block text-[11px] font-semibold text-teal-300">Control target device</label>
+            <select
+              id="jess-device-target"
+              value={activeTargetDeviceId}
+              onChange={event => persistActiveDeviceTarget(event.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-teal-400"
+            >
+              <option value="">Choose an available device</option>
+              {registeredDevices.map(device => (
+                <option key={device.id} value={device.id} disabled={device.status !== 'ONLINE'}>
+                  {device.name} · {device.platform} · {device.status === 'ONLINE' ? (device.fullControlActive ? 'Ready' : 'Online') : 'Offline'}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+              Choose your Windows laptop or Android phone. Device actions will be routed to this target when the request does not name one.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">
