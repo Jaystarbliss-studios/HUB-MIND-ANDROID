@@ -457,9 +457,16 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
     name: 'dispatch_android_device_command',
     description: 'Send one explicit, owner-requested command to a registered Android phone from the installed Hub-Mind Windows desktop app. The Android user must have Hub-Mind open, signed in, and the user-enabled Android Device Agent foreground service running. Use only when the user explicitly asked you to operate their phone in this turn; set userExplicitlyRequested=true only for that direct request. Choose one discrete action at a time. Never automatically resend a command when its status is pending or unconfirmed. A sent/unverified result means the phone accepted the command but has not proved the resulting screen state.',
     parameters: object({
-      actionType: { type: 'string', enum: ['TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'] },
+      actionType: { type: 'string', enum: ['TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'] },
       targetDeviceId: { type: 'string', description: 'Optional exact Android device ID from the registered devices list.' },
-      parameters: { type: 'object', description: 'Only the parameters required by the selected Android action. Examples: TAP {x,y}; SWIPE {startX,startY,endX,endY}; TYPE_TEXT {text}; OPEN_APP {appName or packageName}.' },
+      parameters: { type: 'object', description: 'Parameters required by the action.', properties: {
+        x: { type: 'number' }, y: { type: 'number' },
+        startX: { type: 'number' }, startY: { type: 'number' },
+        endX: { type: 'number' }, endY: { type: 'number' },
+        text: { type: 'string' }, appName: { type: 'string' },
+        packageName: { type: 'string' }, action: { type: 'string' },
+        value: { type: 'string' }, durationMs: { type: 'number' }
+      } },
       userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this phone action in the current turn.' }
     }, ['actionType','userExplicitlyRequested'])
   },
@@ -3318,7 +3325,9 @@ export async function executeJessTool(
                 status: result.verified === true ? 'done_verified' : 'sent_unverified',
                 commandId: commandRef.id,
                 deviceName: (target as any).deviceName || target.id,
-                message: result.outputText || 'The Android agent completed the command, but the resulting app state was not independently verified.'
+                message: result.outputText || 'The Android agent completed the command, but the resulting app state was not independently verified.',
+                hierarchy: result.hierarchy || null,
+                installedApps: result.installedApps || null
               }
             };
           }
@@ -3331,7 +3340,9 @@ export async function executeJessTool(
                 status: 'sent_unverified',
                 commandId: commandRef.id,
                 deviceName: (target as any).deviceName || target.id,
-                message: result.outputText || 'The Android phone accepted the action, but its resulting screen state is unverified. Do not resend it automatically.'
+                message: result.outputText || 'The Android phone accepted the action, but its resulting screen state is unverified. Do not resend it automatically.',
+                hierarchy: result.hierarchy || null,
+                installedApps: result.installedApps || null
               }
             };
           }
