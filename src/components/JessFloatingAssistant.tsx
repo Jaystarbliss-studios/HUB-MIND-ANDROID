@@ -794,6 +794,10 @@ export function JessFloatingAssistant() {
             share.nativeListener = null;
             if (share.nativePlugin?.stopSharing) await share.nativePlugin.stopSharing().catch(() => undefined);
             share.nativePlugin = null;
+            if (share.nativeScreenSharing) {
+              try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
+              share.nativeScreenSharing = false;
+            }
           };
           if (p.action === 'stop') {
             await stopShare();
