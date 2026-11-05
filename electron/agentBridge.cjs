@@ -185,16 +185,34 @@ function call(method, args = {}, timeout = 15000) {
   const id = (++nextId) + '-' + randomUUID();
   const started = Date.now();
     const timer = setTimeout(() => {
+      const wait = pending.get(id);
       pending.delete(id);
-      lastError = safeDiagnostic('Native action timed out: ' + method + '.');
-      audit('action-timeout', { method, durationMs: Date.now() - started, timeoutMs: timeout, error: lastError });
+      lastError = safeDiagnostic('Native action timed out without a completion acknowledgement: ' + method + '.');
+      audit('action-timeout-unconfirmed', { method, durationMs: Date.now() - started, timeoutMs: timeout, error: lastError });
+
+      // The request was written to the helper's stdin, but no completion
+      // acknowledgement arrived in time. Do not label it failed: the OS action
+      // may already have been dispatched. The renderer maps this to
+      // sent_unverified and must not repeat non-idempotent input automatically.
+      wait?.resolve({
+        ok: true,
+        verified: false,
+        status: 'sent_unverified',
+        accepted: true,
+        evidence: null,
+        error: null,
+        message: 'The native helper received the request, but no completion acknowledgement arrived before the timeout. The action may already have been sent. Do not repeat it automatically.'
+      });
+
+      // Recycle an unresponsive protocol process only after returning the honest
+      // delivery status to the caller. This does not assert that the target UI
+      // changed successfully.
       if (child === proc && proc.exitCode === null) {
         try { proc.kill(); } catch {}
         child = null;
         childReady = false;
         childReadyPromise = null;
       }
-      reject(new Error('Native action timed out: ' + method + '. The sidecar was stopped to prevent a hung command from blocking later actions.'));
     }, timeout);
     pending.set(id, { resolve, reject, timer, method, started });
     audit('action-started', { method, timeoutMs: timeout });
