@@ -453,6 +453,16 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'desktop_launch_app', description: 'On the installed Windows Hub-Mind desktop app, request permission to launch an approved built-in application. Always shows a confirmation dialog.', parameters: object({ appName: { type: 'string', enum: ['calculator', 'notepad', 'paint', 'explorer', 'taskManager', 'edge', 'chrome', 'word', 'excel', 'powerpoint', 'teams', 'vscode'] } }, ['appName']) },
   { name: 'desktop_run_readonly_command', description: 'On the installed Windows app, request permission to run an approved read-only Windows diagnostic command. Always shows a confirmation dialog and cannot execute arbitrary shell commands.', parameters: object({ commandName: { type: 'string', enum: ['ipconfig', 'systemInfo', 'runningProcesses'] } }, ['commandName']) },
   { name: 'desktop_open_website', description: 'Ask the installed Windows app to open an HTTP or HTTPS URL in the default browser after user confirmation.', parameters: object({ url: { type: 'string' } }, ['url']) },
+  {
+    name: 'dispatch_android_device_command',
+    description: 'Send one explicit, owner-requested command to a registered Android phone from the installed Hub-Mind Windows desktop app. The Android user must have Hub-Mind open, signed in, and the user-enabled Android Device Agent foreground service running. Use only when the user explicitly asked you to operate their phone in this turn; set userExplicitlyRequested=true only for that direct request. Choose one discrete action at a time. Never automatically resend a command when its status is pending or unconfirmed. A sent/unverified result means the phone accepted the command but has not proved the resulting screen state.',
+    parameters: object({
+      actionType: { type: 'string', enum: ['TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'] },
+      targetDeviceId: { type: 'string', description: 'Optional exact Android device ID from the registered devices list.' },
+      parameters: { type: 'object', description: 'Only the parameters required by the selected Android action. Examples: TAP {x,y}; SWIPE {startX,startY,endX,endY}; TYPE_TEXT {text}; OPEN_APP {appName or packageName}.' },
+      userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this phone action in the current turn.' }
+    }, ['actionType','userExplicitlyRequested'])
+  },
   { name: 'end_session', description: 'Put the AI assistant to sleep or end the current live voice session when the user says "end this session", "go to sleep", "sleep", "deactivate", or wants to conclude.', parameters: object({ reason: { type: 'string' } }) },
 ];
 
@@ -3203,6 +3213,149 @@ export async function executeJessTool(
             allTasks: jessBackgroundTasks.getTasksForUser(user.id).slice(0, 5),
             summary: jessBackgroundTasks.getActiveTasksSummary(user.id),
           },
+        };
+      }
+
+      case 'dispatch_android_device_command': {
+        if (args?.userExplicitlyRequested !== true) {
+          return { result: { success: false, error: 'A direct user request is required before operating an Android device.' } };
+        }
+        const desktop = (window as any).hubMindDesktop;
+        if (!desktop?.isDesktopApp) {
+          return { result: { success: false, error: 'Android remote control is available from the installed Hub-Mind desktop application, not a normal browser tab.' } };
+        }
+
+        const allowedActions = new Set([
+          'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT',
+          'OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN',
+          'SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS',
+          'OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
+        ]);
+        const actionType = String(args?.actionType || '').toUpperCase();
+        if (!allowedActions.has(actionType)) {
+          return { result: { success: false, error: 'Unsupported Android device action.' } };
+        }
+
+        const allowedParameterNames = new Set([
+          'x','y','startX','startY','endX','endY','text','appName','packageName',
+          'action','value','durationMs'
+        ]);
+        const rawParameters = args?.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)
+          ? args.parameters : {};
+        const parameters: Record<string, string | number | boolean> = {};
+        for (const [key, value] of Object.entries(rawParameters)) {
+          if (!allowedParameterNames.has(key)) continue;
+          if (typeof value === 'string') {
+            if (value.length > 5000) return { result: { success: false, error: 'Android command text exceeds the 5,000-character limit.' } };
+            parameters[key] = value;
+          } else if (typeof value === 'boolean') {
+            parameters[key] = value;
+          } else if (typeof value === 'number' && Number.isFinite(value)) {
+            parameters[key] = value;
+          }
+        }
+        if (JSON.stringify(parameters).length > 8000) {
+          return { result: { success: false, error: 'Android command parameters are too large.' } };
+        }
+
+        const deviceSnapshot = await getDocs(query(
+          collection(db, 'users', user.id, 'devices'),
+          where('platform', '==', 'ANDROID')
+        ));
+        const now = Date.now();
+        const onlineDevices = deviceSnapshot.docs
+          .map(entry => ({ id: entry.id, ...entry.data() }))
+          .filter((entry: any) => {
+            const lastSeen = typeof entry.lastSeenAt === 'number'
+              ? entry.lastSeenAt
+              : Date.parse(String(entry.lastSeenAt || ''));
+            return entry.status === 'ONLINE' && Number.isFinite(lastSeen) && now - lastSeen < 90000;
+          });
+        const requestedDeviceId = String(args?.targetDeviceId || '').trim();
+        const target = requestedDeviceId
+          ? onlineDevices.find((device: any) => device.id === requestedDeviceId)
+          : onlineDevices.length === 1 ? onlineDevices[0] : null;
+
+        if (!target) {
+          if (requestedDeviceId) {
+            return { result: { success: false, error: 'That Android device is not currently online. Open Hub-Mind on the phone and enable its Android Device Agent foreground service.' } };
+          }
+          if (onlineDevices.length > 1) {
+            return { result: { success: false, error: 'More than one Android device is online. Specify the targetDeviceId for the intended phone.' } };
+          }
+          return { result: { success: false, error: 'No Android device has sent a recent heartbeat. Open Hub-Mind on the phone, sign in, and enable Android Device Agent in Settings.' } };
+        }
+
+        const createdAt = Date.now();
+        const commandRef = await addDoc(collection(db, 'users', user.id, 'deviceCommands'), {
+          issuingUserId: user.id,
+          sourceDeviceId: 'windows-desktop',
+          targetDeviceId: target.id,
+          actionType,
+          parameters,
+          status: 'CREATED',
+          createdAt,
+          expiresAt: createdAt + 60000
+        });
+
+        // Wait briefly for the Android foreground agent to acknowledge execution.
+        // A timeout is not reported as failure: once written to Firestore the
+        // phone may still receive it. Never auto-retry and risk duplicate taps.
+        const deadline = Date.now() + 14000;
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          const currentCommand = await getDoc(commandRef);
+          if (!currentCommand.exists()) break;
+          const data = currentCommand.data();
+          const status = String(data.status || 'CREATED');
+
+          if (status === 'COMPLETED') {
+            const result = data.result || {};
+            return {
+              result: {
+                success: true,
+                verified: result.verified === true,
+                status: result.verified === true ? 'done_verified' : 'sent_unverified',
+                commandId: commandRef.id,
+                deviceName: (target as any).deviceName || target.id,
+                message: result.outputText || 'The Android agent completed the command, but the resulting app state was not independently verified.'
+              }
+            };
+          }
+          if (status === 'SENT_UNVERIFIED') {
+            const result = data.result || {};
+            return {
+              result: {
+                success: true,
+                verified: false,
+                status: 'sent_unverified',
+                commandId: commandRef.id,
+                deviceName: (target as any).deviceName || target.id,
+                message: result.outputText || 'The Android phone accepted the action, but its resulting screen state is unverified. Do not resend it automatically.'
+              }
+            };
+          }
+          if (status === 'FAILED' || status === 'EXPIRED') {
+            return {
+              result: {
+                success: false,
+                status: 'failed',
+                commandId: commandRef.id,
+                error: data.error || 'The Android device could not execute the requested action.'
+              }
+            };
+          }
+        }
+
+        return {
+          result: {
+            success: true,
+            verified: false,
+            status: 'sent_unverified',
+            commandId: commandRef.id,
+            deviceName: (target as any).deviceName || target.id,
+            message: 'The command is safely queued for the Android device, but no completion acknowledgement has arrived yet. Do not send it again; check this command status before taking another action.'
+          }
         };
       }
 
