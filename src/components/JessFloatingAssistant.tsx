@@ -326,6 +326,12 @@ export function JessFloatingAssistant() {
   const sessionEndingRef = useRef(false);
   const screenControlRef = useRef<{ timer: number | null; running: boolean; speed: number; direction: number; axis: 'x' | 'y' }>({ timer: null, running: false, speed: 3, direction: 1, axis: 'y' });
   const screenShareRef = useRef<{ stream: MediaStream | null; timer: number | null; video: HTMLVideoElement | null; nativePlugin: any; nativeListener: any; nativeScreenSharing: boolean }>({ stream: null, timer: null, video: null, nativePlugin: null, nativeListener: null, nativeScreenSharing: false });
+  const nativeJessMicrophoneActiveRef = useRef(false);
+  const setNativeJessMicrophoneActive = useCallback((active: boolean) => {
+    if (nativeJessMicrophoneActiveRef.current === active) return;
+    nativeJessMicrophoneActiveRef.current = active;
+    try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(active); } catch {}
+  }, []);
   const [screenSharingActive, setScreenSharingActive] = useState(false);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioInputId, setSelectedAudioInputId] = useState(() => { try { return localStorage.getItem('hubmind.jess.audioInputDeviceId') || ''; } catch { return ''; } });
@@ -518,7 +524,7 @@ export function JessFloatingAssistant() {
       share.video = null;
       setSpeechState({ text: error?.message || 'Screen sharing was cancelled or permission was denied.', speaker: 'jess', visible: true });
     }
-  }, [stopScreenSharing]);
+  }, [stopScreenSharing, setNativeJessMicrophoneActive]);
 
   useEffect(() => {
     const nativeAndroid = (window as any).HubMindNative;
@@ -658,7 +664,7 @@ export function JessFloatingAssistant() {
         try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
         share.nativeScreenSharing = false;
       }
-      try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(false); } catch {}
+      setNativeJessMicrophoneActive(false);
       void clientRef.current?.disconnect();
       clientRef.current = null;
       const lease = sessionLeaseRef.current;
@@ -666,7 +672,7 @@ export function JessFloatingAssistant() {
       if (lease?.timer !== null && lease?.timer !== undefined) window.clearInterval(lease.timer);
       if (lease) void releaseJessSession(lease.userId, lease.sessionId).catch(error => console.warn('[Jess] Could not release session on unmount:', error));
     };
-  }, []);
+  }, [setNativeJessMicrophoneActive]);
 
   const scheduleFade = useCallback((delayMs = 5000) => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -681,7 +687,7 @@ export function JessFloatingAssistant() {
     sessionLeaseRef.current = null;
     if (lease?.timer !== null && lease?.timer !== undefined) window.clearInterval(lease.timer);
     if (lease) void releaseJessSession(lease.userId, lease.sessionId).catch(error => console.warn('[Jess] Could not release cross-client session:', error));
-    try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(false); } catch {}
+    setNativeJessMicrophoneActive(false);
     await stopScreenSharing(false);
     await clientRef.current?.disconnect();
     clientRef.current = null;
@@ -749,12 +755,11 @@ export function JessFloatingAssistant() {
     const client = new LiveAudioClient({
       onStatusChange: status => {
         setConnection(status);
-        try {
-          // Android 11+ requires an active microphone foreground-service type
-          // to keep a user-started Jess Live session available after the app is
-          // backgrounded. The native side checks RECORD_AUDIO before promoting.
-          (window as any).HubMindNative?.onJessVoiceSessionActive?.(status === 'connected');
-        } catch {}
+        // Only promote Android's microphone foreground-service type after Live
+        // has actually connected. This avoids starting a foreground service for
+        // an idle/disconnected WebView while preserving an active session in background.
+        if (status === 'connected') setNativeJessMicrophoneActive(true);
+        else if (status === 'disconnected' || status === 'error') setNativeJessMicrophoneActive(false);
       },
       onJessStateChange: setState,
       onJessTranscript: (text) => {
