@@ -309,6 +309,10 @@ class MainActivity : ComponentActivity() {
                                 // Authentication belongs to the shared Firebase workspace.
                                 // Open its sign-in route rather than signing out a mock native user.
                                 onSignOut = {
+                                    webView.evaluateJavascript(
+                                        "window.dispatchEvent(new Event('hubmind-native-signout'));",
+                                        null
+                                    )
                                     webView.loadUrl("https://hub-mind.netlify.app/login")
                                     currentTab = HubMindNavDestination.WORKSPACE
                                 }
