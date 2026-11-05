@@ -269,6 +269,22 @@ async function startServer() {
     'SET_CLIPBOARD', 'GET_CLIPBOARD', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS',
     'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS',
   ]);
+  // Windows commands are accepted only for the registered Windows endpoint; the
+  // desktop receiver performs a second local Full Control check before execution.
+  const windowsActionTypes = new Set([
+    'list_windows', 'manage_windows', 'control_mouse', 'drag_windows_mouse',
+    'type_windows_text', 'press_windows_keys', 'control_system_volume',
+    'control_screen_brightness', 'take_windows_screenshot',
+    'find_windows_ui_element', 'list_windows_ui_elements', 'invoke_windows_ui_element',
+    'set_windows_ui_value', 'read_windows_screen', 'open_local_windows_path',
+    'launch_windows_application', 'get_windows_time', 'get_windows_system_info',
+    'chrome_bridge_status', 'chrome_list_tabs', 'chrome_open_tab', 'chrome_close_tab',
+    'chrome_activate_tab', 'chrome_navigate_tab', 'chrome_reload_tab',
+    'chrome_read_page', 'chrome_find_element', 'chrome_click_element',
+    'chrome_fill_field', 'chrome_scroll', 'chrome_capture_screenshot',
+    'manage_windows_files', 'manage_windows_clipboard', 'control_windows_power',
+    'run_windows_command_native', 'scan_windows_storage', 'clean_windows_storage_candidates',
+  ]);
   const safeDeviceId = (value: unknown) => /^[A-Za-z0-9_-]{6,128}$/.test(String(value || ''));
   const userDevicePath = (uid: string, suffix = '') =>
     'users/' + encodeURIComponent(uid) + '/devices' + suffix;
@@ -325,7 +341,10 @@ async function startServer() {
       const deviceId = String(req.body?.deviceId || '').trim();
       if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid device ID.' });
 
-      const deviceName = String(req.body?.deviceName || 'Android device').trim().slice(0, 120) || 'Android device';
+      const platform = String(req.body?.platform || 'ANDROID').trim().toUpperCase();
+      if (!['ANDROID', 'WINDOWS'].includes(platform)) return res.status(400).json({ error: 'Device platform must be ANDROID or WINDOWS.' });
+      const defaultName = platform === 'WINDOWS' ? 'Windows desktop' : 'Android device';
+      const deviceName = String(req.body?.deviceName || defaultName).trim().slice(0, 120) || defaultName;
       const capabilities = Array.isArray(req.body?.capabilities)
         ? req.body.capabilities.map((item: unknown) => String(item).slice(0, 80)).slice(0, 40)
         : [];
@@ -333,13 +352,17 @@ async function startServer() {
       const values = {
         deviceId,
         deviceName,
-        platform: 'ANDROID',
+        platform,
         status: 'ONLINE',
         capabilities,
         clientVersion: String(req.body?.clientVersion || 'unknown').slice(0, 40),
+        model: String(req.body?.model || '').slice(0, 100),
         lastSeenAt: now,
         registeredAt: String(req.body?.registeredAt || now).slice(0, 40),
         fullControlActive: req.body?.fullControlActive === true,
+        isCurrentDevice: true,
+        permissionMode: String(req.body?.permissionMode || 'ask').slice(0, 40),
+        ...(Number.isFinite(Number(req.body?.batteryPercent)) ? { batteryPercent: Math.max(0, Math.min(100, Number(req.body.batteryPercent))) } : {}),
       };
 
       const path = userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId));
@@ -361,24 +384,32 @@ async function startServer() {
     try {
       const actor = await verifyAuthenticatedHubMindRequest(req);
       const targetDeviceId = String(req.body?.targetDeviceId || '').trim();
-      const actionType = String(req.body?.actionType || '').trim().toUpperCase();
+      const requestedAction = String(req.body?.actionType || '').trim();
       const parameters = req.body?.parameters && typeof req.body.parameters === 'object' && !Array.isArray(req.body.parameters)
         ? req.body.parameters
         : {};
-      if (!safeDeviceId(targetDeviceId)) return res.status(400).json({ error: 'Choose a registered Android device.' });
-      if (!androidActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Android device action.' });
-      if (JSON.stringify(parameters).length > 20000) return res.status(413).json({ error: 'Android action parameters are too large.' });
+      if (!safeDeviceId(targetDeviceId)) return res.status(400).json({ error: 'Choose a registered phone or computer.' });
+      if (JSON.stringify(parameters).length > 20000) return res.status(413).json({ error: 'Device command parameters are too large.' });
 
       const device = await getDeviceRecord(actor.uid, targetDeviceId);
-      if (!device || device.platform !== 'ANDROID') return res.status(404).json({ error: 'That Android device is not registered to this Hub-Mind account.' });
-      if (device.status !== 'ONLINE') return res.status(409).json({ error: 'The Android device is offline. Open Hub-Mind on the phone and enable its Active Device Control Session.' });
+      if (!device || !['ANDROID', 'WINDOWS'].includes(String(device.platform || ''))) {
+        return res.status(404).json({ error: 'That device is not registered to this Hub-Mind account.' });
+      }
+      const platform = String(device.platform).toUpperCase();
+      const actionType = platform === 'ANDROID' ? requestedAction.toUpperCase() : requestedAction;
+      if (platform === 'ANDROID' && !androidActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Android device action.' });
+      if (platform === 'WINDOWS' && !windowsActionTypes.has(actionType)) return res.status(400).json({ error: 'Unsupported Windows device action.' });
+      if (device.status !== 'ONLINE') return res.status(409).json({ error: 'The target device is offline or has not checked in recently.' });
+      if (platform === 'WINDOWS' && device.fullControlActive !== true) {
+        return res.status(409).json({ error: 'Windows Full Control is not active on the target laptop. Open Hub-Mind on that laptop and enable Jess Full Control.' });
+      }
 
       const now = Date.now();
       const commandId = 'cmd_' + randomUUID().replace(/-/g, '');
       const command = {
         commandId,
         issuingUserId: actor.uid,
-        sourceDeviceId: String(req.body?.sourceDeviceId || 'hubmind-desktop').slice(0, 128),
+        sourceDeviceId: String(req.body?.sourceDeviceId || 'hubmind-workspace-client').slice(0, 128),
         targetDeviceId,
         actionType,
         parameters,
@@ -402,12 +433,21 @@ async function startServer() {
       const deviceId = String(req.body?.deviceId || '').trim();
       if (!safeDeviceId(deviceId)) return res.status(400).json({ error: 'Invalid Android device ID.' });
       const device = await getDeviceRecord(actor.uid, deviceId);
-      if (!device || device.platform !== 'ANDROID') return res.status(404).json({ error: 'This Android device is not registered.' });
-
+      if (!device || !['ANDROID', 'WINDOWS'].includes(String(device.platform || ''))) {
+        return res.status(404).json({ error: 'This device is not registered to this Hub-Mind account.' });
+      }
+      const platform = String(device.platform).toUpperCase();
+      const fullControlActive = req.body?.fullControlActive === true
+        ? true
+        : platform === 'ANDROID' ? device.fullControlActive === true : false;
       await patchFirestoreDoc(userDevicePath(actor.uid, '/' + encodeURIComponent(deviceId)), {
         status: 'ONLINE',
         lastSeenAt: new Date().toISOString(),
+        fullControlActive,
       });
+      if (platform === 'WINDOWS' && !fullControlActive) {
+        return res.json({ success: true, commands: [], note: 'Windows Full Control is not active; no remote actions were returned.' });
+      }
 
       let result: any = null;
       try {
