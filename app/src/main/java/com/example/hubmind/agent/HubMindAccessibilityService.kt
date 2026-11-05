@@ -117,9 +117,12 @@ class HubMindAccessibilityService : AccessibilityService() {
     fun performTextSetOnFocused(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        // Never type into a password field through remote device control.
+        if (!focus.isEditable || focus.isPassword) return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val accepted = focus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        return accepted && focus.text?.toString() == text
     }
 }
