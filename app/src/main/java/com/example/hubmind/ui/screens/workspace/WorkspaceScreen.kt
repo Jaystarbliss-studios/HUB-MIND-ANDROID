@@ -16,6 +16,10 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONObject
+import com.example.hubmind.data.session.HubMindNativeSessionStore
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -258,6 +262,31 @@ fun WorkspaceScreen(
                         }
                     }
                     return true
+                }
+            }
+
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                WebViewCompat.addWebMessageListener(
+                    this,
+                    "HubMindAndroid",
+                    setOf("https://$HUBMIND_HOST")
+                ) { _, message, sourceOrigin, isMainFrame, _ ->
+                    if (!isMainFrame || !sourceOrigin.scheme.equals("https", ignoreCase = true) ||
+                        !sourceOrigin.host.equals(HUBMIND_HOST, ignoreCase = true)
+                    ) return@addWebMessageListener
+
+                    runCatching {
+                        val payload = JSONObject(message.data ?: return@runCatching)
+                        when (payload.optString("type")) {
+                            "session" -> HubMindNativeSessionStore.update(
+                                payload.optString("userId"),
+                                payload.optString("idToken")
+                            )
+                            "clear" -> HubMindNativeSessionStore.clear()
+                        }
+                    }.onFailure {
+                        android.util.Log.w("HubMindWorkspace", "Ignored invalid native session message.")
+                    }
                 }
             }
 
