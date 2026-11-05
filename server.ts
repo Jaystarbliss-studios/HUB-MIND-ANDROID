@@ -496,6 +496,7 @@ async function startServer() {
   });
 
   const liveTokenRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const liveTokenIdentityCache = new Map<string, { localId: string; expiresAt: number }>();
   app.post(["/api/live-token", "/live-token"], async (req, res) => {
     const clientKey = String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 160);
     const now = Date.now();
@@ -514,19 +515,37 @@ async function startServer() {
       const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
       if (!idToken || idToken.length > 10000) return res.status(401).json({ error: "Authentication required. Please sign in again." });
 
-      const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
-      if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
+      const tokenFingerprint = createHash("sha256").update(idToken).digest("hex");
+      const cachedIdentity = liveTokenIdentityCache.get(tokenFingerprint);
+      let verifiedUser: { localId: string } | null = cachedIdentity && cachedIdentity.expiresAt > now
+        ? { localId: cachedIdentity.localId }
+        : null;
 
-      // Ask Firebase Auth to validate the ID token. Never trust a bearer token
-      // merely because the client supplied it.
-      const identityResponse = await fetch(
-        "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
-      );
-      if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
-      const identityData = await identityResponse.json() as any;
-      const verifiedUser = identityData?.users?.[0];
-      if (!verifiedUser?.localId || verifiedUser.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+      // Validate each Firebase ID token with Firebase Auth, but avoid repeating
+      // that network round-trip when a just-verified token is immediately used
+      // to reconnect a Live session. The short cache is keyed by a one-way hash.
+      if (!verifiedUser) {
+        const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+        if (!firebaseApiKey) return res.status(503).json({ error: "Firebase token verification is not configured on this server." });
+
+        const identityResponse = await fetch(
+          "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(firebaseApiKey),
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10_000) },
+        );
+        if (!identityResponse.ok) return res.status(401).json({ error: "Your Hub-Mind session is invalid or expired. Please sign in again." });
+        const identityData = await identityResponse.json() as any;
+        const identity = identityData?.users?.[0];
+        if (!identity?.localId || identity.disabled) return res.status(401).json({ error: "Your Hub-Mind account is unavailable." });
+
+        verifiedUser = { localId: identity.localId };
+        liveTokenIdentityCache.set(tokenFingerprint, { localId: identity.localId, expiresAt: now + 30_000 });
+      }
+
+      if (liveTokenIdentityCache.size > 5000) {
+        for (const [key, value] of liveTokenIdentityCache) {
+          if (value.expiresAt <= now) liveTokenIdentityCache.delete(key);
+        }
+      }
 
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured on the server." });
