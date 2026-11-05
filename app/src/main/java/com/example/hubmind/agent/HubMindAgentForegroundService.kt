@@ -55,6 +55,7 @@ class HubMindAgentForegroundService : Service() {
             ?: "android-${Build.MANUFACTURER.lowercase()}-${Build.MODEL.hashCode().toUInt().toString(16)}"
     }
     private var lastHeartbeatAt = 0L
+    private var lastHeartbeatUserId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -93,6 +94,10 @@ class HubMindAgentForegroundService : Service() {
             }
 
             try {
+                if (lastHeartbeatUserId != credentials.userId) {
+                    lastHeartbeatUserId = credentials.userId
+                    lastHeartbeatAt = 0L
+                }
                 val now = System.currentTimeMillis()
                 if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
                     firestore.upsertAndroidDevice(
@@ -103,7 +108,6 @@ class HubMindAgentForegroundService : Service() {
                             "ANDROID_ACCESSIBILITY",
                             "APP_LAUNCH",
                             "SCREEN_HIERARCHY",
-                            "SCREEN_CAPTURE",
                             "CLIPBOARD",
                             "GLOBAL_NAVIGATION"
                         ),
@@ -206,7 +210,15 @@ class HubMindAgentForegroundService : Service() {
             "outputText" to (result.outputText ?: ""),
             "error" to (result.error ?: ""),
             "durationMs" to result.durationMs,
-            "actionType" to actionName
+            "actionType" to actionName,
+            "hierarchy" to result.hierarchy?.let { serializeHierarchy(it) },
+            "installedApps" to result.installedApps?.take(150)?.map { app ->
+                mapOf(
+                    "packageName" to app.packageName,
+                    "appName" to app.appName,
+                    "isSystemApp" to app.isSystemApp
+                )
+            }
         )
         firestore.updateDeviceCommand(
             userId,
@@ -220,6 +232,38 @@ class HubMindAgentForegroundService : Service() {
                 "error" to (result.error ?: "")
             ),
             idToken
+        )
+    }
+
+    private fun serializeHierarchy(
+        node: UiNodeInfo,
+        depth: Int = 0,
+        budget: IntArray = intArrayOf(0)
+    ): Map<String, Any?> {
+        if (depth > 8 || budget[0] >= 350) return mapOf("truncated" to true)
+        budget[0] += 1
+        return mapOf(
+            "id" to node.id,
+            "viewIdResourceName" to (node.viewIdResourceName ?: ""),
+            "className" to (node.className ?: ""),
+            "packageName" to (node.packageName ?: ""),
+            "text" to (node.text ?: ""),
+            "contentDescription" to (node.contentDescription ?: ""),
+            "isClickable" to node.isClickable,
+            "isEditable" to node.isEditable,
+            "isScrollable" to node.isScrollable,
+            "boundsInScreen" to mapOf(
+                "left" to node.boundsInScreen.left,
+                "top" to node.boundsInScreen.top,
+                "right" to node.boundsInScreen.right,
+                "bottom" to node.boundsInScreen.bottom,
+                "centerX" to node.boundsInScreen.centerX,
+                "centerY" to node.boundsInScreen.centerY
+            ),
+            "children" to node.children.take(30).map { child ->
+                serializeHierarchy(child, depth + 1, budget)
+            },
+            "childrenTruncated" to (node.children.size > 30 || budget[0] >= 350)
         )
     }
 
