@@ -174,6 +174,25 @@ function highRiskJessConfirmation(toolName: string, args: any): string | null {
   if (name === 'control_windows_power' && ['shutdown','restart'].includes(action)) {
     return 'schedule Windows ' + action + ' in 15 seconds; the action can be cancelled with shutdown /a before it begins';
   }
+  if (name === 'dispatch_device_command') {
+    const deviceAction = String(args?.actionType || '');
+    const params = args?.parameters && typeof args.parameters === 'object' ? args.parameters : {};
+    if (deviceAction === 'manage_windows_files' &&
+        ['delete','remove','recycle','write','move','rename','copy'].includes(String(params.action || '').toLowerCase())) {
+      return 'make a file-system change on the selected Windows laptop: ' +
+        String(params.action || '').toLowerCase() + ' ' + String(params.path || '').slice(0, 180);
+    }
+    if (deviceAction === 'clean_windows_storage_candidates') {
+      return 'move selected Windows storage-cleanup candidates to the Recycle Bin';
+    }
+    if (deviceAction === 'control_windows_power' &&
+        ['shutdown','restart'].includes(String(params.action || '').toLowerCase())) {
+      return 'schedule Windows ' + String(params.action).toLowerCase() + ' on the selected laptop';
+    }
+    if (deviceAction === 'manage_windows' && String(params.action || '').toLowerCase() === 'close_window') {
+      return 'close a Windows application window on the selected laptop';
+    }
+  }
   if (name === 'run_windows_command_native') {
     const command = String(args?.command || '').trim();
     if (/\b(remove-item|remove-itemproperty|clear-content|format(?:-volume|-disk)?|clear-disk|diskpart|bcdedit|shutdown|restart-computer|stop-computer|set-executionpolicy|reg\s+(?:add|delete|import)|cipher\s+\/w|move-item|copy-item|rename-item|invoke-expression|iex)\b/i.test(command) ||
