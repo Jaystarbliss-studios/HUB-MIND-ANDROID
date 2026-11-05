@@ -656,6 +656,7 @@ export function JessFloatingAssistant() {
         try { (window as any).HubMindNative?.stopScreenCapture?.(); } catch {}
         share.nativeScreenSharing = false;
       }
+      try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(false); } catch {}
       void clientRef.current?.disconnect();
       clientRef.current = null;
       const lease = sessionLeaseRef.current;
@@ -678,6 +679,7 @@ export function JessFloatingAssistant() {
     sessionLeaseRef.current = null;
     if (lease?.timer !== null && lease?.timer !== undefined) window.clearInterval(lease.timer);
     if (lease) void releaseJessSession(lease.userId, lease.sessionId).catch(error => console.warn('[Jess] Could not release cross-client session:', error));
+    try { (window as any).HubMindNative?.onJessVoiceSessionActive?.(false); } catch {}
     await stopScreenSharing(false);
     await clientRef.current?.disconnect();
     clientRef.current = null;
@@ -743,7 +745,15 @@ export function JessFloatingAssistant() {
 
     const preferredInputDeviceId = (() => { try { return localStorage.getItem('hubmind.jess.audioInputDeviceId') || selectedAudioInputId; } catch { return selectedAudioInputId; } })();
     const client = new LiveAudioClient({
-      onStatusChange: setConnection,
+      onStatusChange: status => {
+        setConnection(status);
+        try {
+          // Android 11+ requires an active microphone foreground-service type
+          // to keep a user-started Jess Live session available after the app is
+          // backgrounded. The native side checks RECORD_AUDIO before promoting.
+          (window as any).HubMindNative?.onJessVoiceSessionActive?.(status === 'connected');
+        } catch {}
+      },
       onJessStateChange: setState,
       onJessTranscript: (text) => {
         if (!text) return;
