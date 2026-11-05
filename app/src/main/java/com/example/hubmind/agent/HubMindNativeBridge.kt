@@ -17,6 +17,7 @@ class HubMindNativeBridge(
     context: Context,
     private val requestScreenCapture: () -> Unit = {},
     private val stopScreenCapture: () -> Unit = {},
+    private val setJessMicrophoneActive: (Boolean) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -72,6 +73,19 @@ class HubMindNativeBridge(
         if (speaker != "user" && speaker != "jess") return
         if (text.isBlank() || text.length > 12000) return
         transcriptOverlay.show(speaker, text)
+    }
+
+    @JavascriptInterface
+    fun onJessVoiceSessionActive(active: Boolean) {
+        mainHandler.post {
+            try {
+                setJessMicrophoneActive.invoke(active)
+            } catch (error: Exception) {
+                AndroidScreenShareEvents.emit(
+                    AndroidScreenShareEvent("microphone-error", error = error.message ?: "Could not keep Jess voice active in the background.")
+                )
+            }
+        }
     }
 
     @JavascriptInterface
