@@ -1872,7 +1872,7 @@ async function startServer() {
                   largeThresholdMB:{type:"NUMBER"}, inactiveDays:{type:"NUMBER"}, maxSeconds:{type:"NUMBER"}, maxFiles:{type:"NUMBER"},
                   detectDuplicates:{type:"BOOLEAN"}, scanId:{type:"STRING"}, candidateIds:{type:"ARRAY",items:{type:"STRING"}},
                   monitorName:{type:"STRING"}, detail:{type:"STRING"}, url:{type:"STRING"}, selector:{type:"STRING"},
-                  deltaY:{type:"NUMBER"}, deltaX:{type:"NUMBER"}, direction:{type:"STRING",enum:["up","down"]},
+                  direction:{type:"STRING",enum:["up","down"]},
                   speed:{type:"NUMBER"}, commandName:{type:"STRING",enum:["ipconfig","systemInfo","runningProcesses"]}
                 }
               }
