@@ -296,7 +296,7 @@ async function startServer() {
       { method: 'POST', body: JSON.stringify({ fields: encodeFirestoreFields(values) }) },
     );
   };
-  const getDeviceRecord = async (uid: string, deviceId: string) => {
+  const getDeviceRecord = async (uid: string, deviceId: string): Promise<Record<string, any> | null> => {
     const raw: any = await readFirestoreDoc(userDevicePath(uid, '/' + encodeURIComponent(deviceId)));
     return raw ? { id: deviceId, ...decodeFirestoreFields(raw.fields || {}) } : null;
   };
