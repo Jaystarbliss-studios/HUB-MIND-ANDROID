@@ -323,10 +323,10 @@ function createTranscriptOverlayWindow() {
   }));
   guardNavigation(transcriptOverlayWindow);
   transcriptOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
-  // Use native Acrylic where supported; CSS glass remains the fallback.
-  if (process.platform === 'win32' && typeof transcriptOverlayWindow.setBackgroundMaterial === 'function') {
-    try { transcriptOverlayWindow.setBackgroundMaterial('acrylic'); } catch {}
-  }
+  // Keep the native surface fully transparent. A native Acrylic material adds
+  // an opaque blue tint on some Windows builds and makes the caption feel like a
+  // blocking panel even though the window is intended to be click-through.
+  transcriptOverlayWindow.setOpacity(1);
   transcriptOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
   positionTranscriptOverlayWindow();
   transcriptOverlayWindow.on('closed', () => { transcriptOverlayWindow = null; });
@@ -1259,6 +1259,10 @@ app.whenReady().then(() => {
     const overlay = createTranscriptOverlayWindow();
     if (!overlay || overlay.isDestroyed()) return false;
     positionTranscriptOverlayWindow();
+    // Re-assert native click-through every time the overlay is shown. This is
+    // independent of the renderer's pointer-events CSS and lets clicks reach the
+    // application underneath the caption.
+    overlay.setFocusable(false);
     overlay.setIgnoreMouseEvents(true, { forward: true });
     if (visible === true) {
       overlay.setAlwaysOnTop(true, 'screen-saver');
