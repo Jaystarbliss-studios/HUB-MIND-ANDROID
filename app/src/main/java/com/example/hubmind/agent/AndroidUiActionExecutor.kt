@@ -97,13 +97,13 @@ class AndroidUiActionExecutor(private val context: Context) {
                     } else false to false
                     val accepted = firstAccepted && secondAccepted
                     AndroidActionResult(
-                        commandId, command.actionType, success = accepted, verified = false,
+                        commandId, command.actionType, success = firstAccepted || accepted, verified = false,
                         outputText = if (accepted && secondAck) {
                             "Both taps were dispatched by Android; the resulting app state was not independently verified."
                         } else if (firstAccepted && !firstAck) {
                             "First tap was accepted but not acknowledged. Second tap was not sent to avoid an accidental duplicate."
                         } else "Android did not complete the double-tap gesture.",
-                        error = if (accepted || firstAccepted) null else "Android rejected the first tap.",
+                        error = if (firstAccepted) null else "Android rejected the first tap.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -196,6 +196,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         success = ok,
                         verified = false,
                         outputText = if (ok) "Android accepted text input into the focused field; content was not independently read back" else "No active focused editable field found",
+                        error = if (ok) null else "No active focused editable field was available.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -236,8 +237,9 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = launched,
-                        verified = launched,
-                        outputText = "Launched ${app.appName} (${app.packageName})",
+                        verified = false,
+                        outputText = if (launched) "Android accepted the launch request for ${app.appName} (${app.packageName}); the foreground app was not independently checked." else "Android could not launch ${app.appName} (${app.packageName}).",
+                        error = if (launched) null else "The launch request was rejected by Android.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -263,7 +265,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                         success = hierarchy != null,
                         verified = hierarchy != null,
                         hierarchy = hierarchy,
-                        outputText = if (hierarchy != null) "Dumped active window accessibility hierarchy" else "Accessibility service unavailable or window empty",
+                        outputText = if (hierarchy != null) "Read the active Android accessibility hierarchy." else "Accessibility service unavailable or active window is empty.",
+                        error = if (hierarchy != null) null else "Accessibility service is not active or the current window exposes no hierarchy.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -273,8 +276,10 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = true,
-                        verified = true,
-                        outputText = "Screen capture session buffer requested",
+                        verified = false,
+                        outputText = "Screen capture is not available in this Android command path yet.",
+                        error = "Screen capture has not been implemented for the remote Android command receiver.",
+                        success = false,
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -310,7 +315,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Triggered Back navigation",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -322,7 +327,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Triggered Home navigation",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -334,7 +339,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Recents screen",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -346,7 +351,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Notification shade",
                         durationMs = System.currentTimeMillis() - startTime
                     )
@@ -358,7 +363,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         commandId = command.commandId,
                         actionType = command.actionType,
                         success = ok,
-                        verified = ok,
+                        verified = false,
                         outputText = "Opened Quick Settings panel",
                         durationMs = System.currentTimeMillis() - startTime
                     )
