@@ -2,6 +2,7 @@ package com.example.hubmind.agent
 
 import android.content.Context
 import android.os.Build
+import android.os.BatteryManager
 import android.provider.Settings
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -58,12 +59,15 @@ class AndroidDeviceCommandWorker(context: Context) {
             put("SCREEN_READING")
             put("CLIPBOARD")
             put("GLOBAL_NAVIGATION")
+            put("MEDIA_STREAMING")
         }
         val deviceName = listOf(Build.MANUFACTURER, Build.MODEL)
             .filter { it.isNotBlank() }
             .joinToString(" ")
             .ifBlank { "Android device" }
 
+        val batteryManager = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val batteryPercent = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
         postJson(
             path = "/api/devices/register",
             idToken = idToken,
@@ -71,7 +75,10 @@ class AndroidDeviceCommandWorker(context: Context) {
                 .put("deviceId", deviceId)
                 .put("deviceName", deviceName.take(120))
                 .put("platform", "ANDROID")
-                .put("clientVersion", "1.0.0")
+                .put("model", Build.MODEL.take(100))
+                .put("clientVersion", "1.0.1")
+                .put("fullControlActive", true)
+                .put("batteryPercent", batteryPercent.takeIf { it in 0..100 })
                 .put("capabilities", capabilities)
         )
     }
