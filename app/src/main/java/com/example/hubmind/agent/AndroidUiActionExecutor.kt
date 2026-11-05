@@ -208,7 +208,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                         actionType = command.actionType,
                         success = ok,
                         verified = false,
-                        outputText = "Android accepted the clear-text action; field contents were not independently read back",
+                        outputText = if (ok) "Android accepted the clear-text action; field contents were not independently read back" else "No active focused editable field found",
+                        error = if (ok) null else "No active focused editable field was available.",
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -275,11 +276,10 @@ class AndroidUiActionExecutor(private val context: Context) {
                     AndroidActionResult(
                         commandId = command.commandId,
                         actionType = command.actionType,
-                        success = true,
+                        success = false,
                         verified = false,
                         outputText = "Screen capture is not available in this Android command path yet.",
                         error = "Screen capture has not been implemented for the remote Android command receiver.",
-                        success = false,
                         durationMs = System.currentTimeMillis() - startTime
                     )
                 }
