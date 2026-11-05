@@ -199,7 +199,7 @@ fun StatusBadge(
                 modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
-                    .background(status.toColor())
+                    .background(textColor)
             )
             Text(
                 text = text,
