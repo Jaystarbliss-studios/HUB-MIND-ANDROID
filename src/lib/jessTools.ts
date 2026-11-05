@@ -3234,7 +3234,7 @@ export async function executeJessTool(
 
         const allowedActions = new Set([
           'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT',
-          'OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN',
+          'OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY',
           'SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS',
           'OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
         ]);
