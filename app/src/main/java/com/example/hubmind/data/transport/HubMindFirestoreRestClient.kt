@@ -195,7 +195,7 @@ class HubMindFirestoreRestClient {
 
     fun listDeviceCommands(userId: String, bearerToken: String): List<HubMindFirestoreDocument> {
         val response = request(
-            "${documentsBase()}/users/${encodePathSegment(userId)}/deviceCommands?pageSize=100",
+            "${documentsBase()}/users/${encodePathSegment(userId)}/deviceCommands?pageSize=100&orderBy=createdAt%20desc",
             "GET",
             bearerToken,
             null
