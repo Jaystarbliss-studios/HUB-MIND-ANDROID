@@ -1,7 +1,9 @@
 package com.example.hubmind.agent
 
+import android.Manifest
 import android.app.*
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -32,6 +34,8 @@ class HubMindAgentForegroundService : Service() {
         private const val TAG = "HubMindAndroidAgent"
         private const val ACTION_START_SCREEN_CAPTURE = "com.example.hubmind.action.START_SCREEN_CAPTURE"
         private const val ACTION_STOP_SCREEN_CAPTURE = "com.example.hubmind.action.STOP_SCREEN_CAPTURE"
+        private const val ACTION_SET_JESS_MICROPHONE = "com.example.hubmind.action.SET_JESS_MICROPHONE"
+        private const val EXTRA_JESS_MICROPHONE_ACTIVE = "jessMicrophoneActive"
         private const val EXTRA_CAPTURE_RESULT_CODE = "captureResultCode"
         private const val EXTRA_CAPTURE_RESULT_DATA = "captureResultData"
 
@@ -59,12 +63,21 @@ class HubMindAgentForegroundService : Service() {
             }
             context.startService(intent)
         }
+
+        fun setJessMicrophoneActive(context: Context, active: Boolean) {
+            val intent = Intent(context, HubMindAgentForegroundService::class.java).apply {
+                action = ACTION_SET_JESS_MICROPHONE
+                putExtra(EXTRA_JESS_MICROPHONE_ACTIVE, active)
+            }
+            if (active) ContextCompat.startForegroundService(context, intent) else context.startService(intent)
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollingJob: Job? = null
     private lateinit var commandWorker: AndroidDeviceCommandWorker
     private lateinit var screenCaptureManager: AndroidScreenCaptureManager
+    private var jessMicrophoneActive = false
 
     override fun onCreate() {
         super.onCreate()
@@ -74,8 +87,21 @@ class HubMindAgentForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val captureRequested = intent?.action == ACTION_START_SCREEN_CAPTURE
-        startAgentForeground(captureRequested)
+        if (intent?.action == ACTION_SET_JESS_MICROPHONE) {
+            val requested = intent.getBooleanExtra(EXTRA_JESS_MICROPHONE_ACTIVE, false)
+            val hasPermission = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            if (requested && !hasPermission) {
+                jessMicrophoneActive = false
+                AndroidScreenShareEvents.emit(AndroidScreenShareEvent(
+                    "microphone-error",
+                    error = "Grant microphone permission before starting a background Jess voice session."
+                ))
+            } else {
+                jessMicrophoneActive = requested
+            }
+        }
+        val captureRequested = intent?.action == ACTION_START_SCREEN_CAPTURE || screenCaptureManager.isCaptureActive
+        startAgentForeground(captureRequested, jessMicrophoneActive)
 
         when (intent?.action) {
             ACTION_START_SCREEN_CAPTURE -> {
@@ -92,6 +118,7 @@ class HubMindAgentForegroundService : Service() {
             }
             ACTION_STOP_SCREEN_CAPTURE -> {
                 screenCaptureManager.stopCapture()
+                startAgentForeground(includeMediaProjection = false, includeMicrophone = jessMicrophoneActive)
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 manager.notify(NOTIFICATION_ID, buildNotification())
             }
@@ -114,14 +141,16 @@ class HubMindAgentForegroundService : Service() {
         return START_STICKY
     }
 
-    private fun startAgentForeground(includeMediaProjection: Boolean) {
-        val types = when {
-            Build.VERSION.SDK_INT >= 34 && includeMediaProjection ->
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            Build.VERSION.SDK_INT >= 34 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && includeMediaProjection ->
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            else -> 0
+    private fun startAgentForeground(includeMediaProjection: Boolean, includeMicrophone: Boolean) {
+        var types = 0
+        if (Build.VERSION.SDK_INT >= 34) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && includeMediaProjection) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && includeMicrophone) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && types != 0) {
             startForeground(NOTIFICATION_ID, buildNotification(), types)
@@ -138,8 +167,12 @@ class HubMindAgentForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Hub-Mind Android Agent Active")
             .setContentText(
-                if (screenCaptureManagerOrFalse()) "Jess is receiving screen frames. Tap to return to Hub-Mind."
-                else "Your phone is available for commands you explicitly request."
+                when {
+                    screenCaptureManagerOrFalse() && jessMicrophoneActive -> "Jess voice and screen sharing are active."
+                    screenCaptureManagerOrFalse() -> "Jess is receiving screen frames."
+                    jessMicrophoneActive -> "Jess voice is active in the background."
+                    else -> "Your phone is available for commands you explicitly request."
+                }
             )
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
