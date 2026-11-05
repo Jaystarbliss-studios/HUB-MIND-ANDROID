@@ -15,6 +15,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.media.projection.MediaProjectionManager
+import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,6 +31,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.example.hubmind.agent.AndroidScreenShareEvent
+import com.example.hubmind.agent.AndroidScreenShareEvents
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.agent.HubMindNativeBridge
 import com.example.hubmind.di.ServiceLocator
 import com.example.hubmind.ui.components.HubMindBottomBar
@@ -80,6 +85,42 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val screenCaptureLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    val data = result.data
+                    if (result.resultCode == Activity.RESULT_OK && data != null) {
+                        HubMindAgentForegroundService.startScreenCapture(
+                            context,
+                            result.resultCode,
+                            data
+                        )
+                    } else {
+                        AndroidScreenShareEvents.emit(
+                            AndroidScreenShareEvent("error", error = "Screen sharing was cancelled.")
+                        )
+                    }
+                }
+
+                val nativeBridge = remember {
+                    HubMindNativeBridge(
+                        context = context,
+                        requestScreenCapture = {
+                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                            if (manager == null) {
+                                AndroidScreenShareEvents.emit(
+                                    AndroidScreenShareEvent("error", error = "Android screen capture is not available on this device.")
+                                )
+                            } else {
+                                screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
+                            }
+                        },
+                        stopScreenCapture = {
+                            HubMindAgentForegroundService.stopScreenCapture(context)
+                        }
+                    )
+                }
+
                 val fileChooserLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult()
                 ) { result ->
@@ -118,7 +159,6 @@ class MainActivity : ComponentActivity() {
                             displayZoomControls = false
                         }
 
-                        val nativeBridge = HubMindNativeBridge(context)
                         addJavascriptInterface(nativeBridge, "HubMindNative")
 
                         webViewClient = object : WebViewClient() {
@@ -244,6 +284,18 @@ class MainActivity : ComponentActivity() {
                         pendingWebPermission.value = null
                         webView.stopLoading()
                         webView.destroy()
+                        nativeBridge.close()
+                    }
+                }
+
+                LaunchedEffect(webView) {
+                    AndroidScreenShareEvents.events.collect { event ->
+                        val payload = JSONObject()
+                            .put("type", event.type)
+                            .put("dataUrl", event.dataUrl)
+                            .put("error", event.error)
+                        val script = "window.dispatchEvent(new CustomEvent('hubmind-native-screen-share',{detail:$payload}));"
+                        webView.post { webView.evaluateJavascript(script, null) }
                     }
                 }
 
