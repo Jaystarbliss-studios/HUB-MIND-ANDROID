@@ -55,7 +55,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.TAP -> {
                     if (service == null) {
                         return@withContext AndroidActionResult(
-                            commandId, command.actionType, success = false,
+                            commandId = command.commandId, actionType = command.actionType, success = false,
                             error = "Accessibility service is not active. Enable Hub-Mind Agent in Settings.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -66,7 +66,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         service.performTapAt(x, y, onComplete = callback)
                     }
                     AndroidActionResult(
-                        commandId, command.actionType,
+                        commandId = command.commandId, actionType = command.actionType,
                         success = accepted,
                         verified = false,
                         outputText = when {
@@ -82,7 +82,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.DOUBLE_TAP -> {
                     if (service == null) {
                         return@withContext AndroidActionResult(
-                            commandId, command.actionType, success = false,
+                            commandId = command.commandId, actionType = command.actionType, success = false,
                             error = "Accessibility service is not active. Enable Hub-Mind Agent in Settings.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -97,7 +97,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                     } else false to false
                     val accepted = firstAccepted && secondAccepted
                     AndroidActionResult(
-                        commandId, command.actionType, success = firstAccepted || accepted, verified = false,
+                        commandId = command.commandId, actionType = command.actionType, success = firstAccepted || accepted, verified = false,
                         outputText = if (accepted && secondAck) {
                             "Both taps were dispatched by Android; the resulting app state was not independently verified."
                         } else if (firstAccepted && !firstAck) {
@@ -111,7 +111,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.LONG_PRESS -> {
                     if (service == null) {
                         return@withContext AndroidActionResult(
-                            commandId, command.actionType, success = false,
+                            commandId = command.commandId, actionType = command.actionType, success = false,
                             error = "Accessibility service is not active. Enable Hub-Mind Agent in Settings.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -122,7 +122,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         service.performTapAt(x, y, durationMs = 800, onComplete = callback)
                     }
                     AndroidActionResult(
-                        commandId, command.actionType, success = accepted, verified = false,
+                        commandId = command.commandId, actionType = command.actionType, success = accepted, verified = false,
                         outputText = if (accepted && acknowledged) {
                             "Long-press gesture was dispatched by Android; the resulting app state was not independently verified."
                         } else if (accepted) {
@@ -136,7 +136,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.SWIPE -> {
                     if (service == null) {
                         return@withContext AndroidActionResult(
-                            commandId, command.actionType, success = false,
+                            commandId = command.commandId, actionType = command.actionType, success = false,
                             error = "Accessibility service is not active. Enable Hub-Mind Agent in Settings.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -149,7 +149,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         service.performSwipe(startX, startY, endX, endY, onComplete = callback)
                     }
                     AndroidActionResult(
-                        commandId, command.actionType, success = accepted, verified = false,
+                        commandId = command.commandId, actionType = command.actionType, success = accepted, verified = false,
                         outputText = if (accepted && acknowledged) {
                             "Swipe gesture was dispatched by Android; the resulting app state was not independently verified."
                         } else if (accepted) {
@@ -163,7 +163,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                 AndroidActionType.SCROLL -> {
                     if (service == null) {
                         return@withContext AndroidActionResult(
-                            commandId, command.actionType, success = false,
+                            commandId = command.commandId, actionType = command.actionType, success = false,
                             error = "Accessibility service is not active. Enable Hub-Mind Agent in Settings.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -176,7 +176,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                         service.performSwipe(startX, startY, endX, endY, onComplete = callback)
                     }
                     AndroidActionResult(
-                        commandId, command.actionType, success = accepted, verified = false,
+                        commandId = command.commandId, actionType = command.actionType, success = accepted, verified = false,
                         outputText = if (accepted && acknowledged) {
                             "Scroll gesture was dispatched by Android; the resulting app state was not independently verified."
                         } else if (accepted) {
