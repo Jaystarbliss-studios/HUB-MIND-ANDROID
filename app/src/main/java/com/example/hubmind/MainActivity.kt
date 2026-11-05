@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.example.hubmind.agent.HubMindNativeBridge
 import com.example.hubmind.di.ServiceLocator
 import com.example.hubmind.ui.components.HubMindBottomBar
 import com.example.hubmind.ui.components.HubMindNavDestination
@@ -117,15 +118,36 @@ class MainActivity : ComponentActivity() {
                             displayZoomControls = false
                         }
 
+                        val nativeBridge = HubMindNativeBridge(context)
+                        addJavascriptInterface(nativeBridge, "HubMindNative")
+
                         webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                val host = runCatching { Uri.parse(url).host?.lowercase() }.getOrNull()
+                                if (host == HubMindNativeBridge.WORKSPACE_HOST) {
+                                    view?.addJavascriptInterface(nativeBridge, "HubMindNative")
+                                } else {
+                                    // The token bridge is exposed only on the first-party Hub-Mind
+                                    // origin, never on external pages or OAuth provider pages.
+                                    view?.removeJavascriptInterface("HubMindNative")
+                                }
+                                super.onPageStarted(view, url, favicon)
+                            }
+
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ): Boolean {
                                 val uri = request?.url ?: return false
-                                // Keep HTTPS navigation in the authenticated Hub-Mind shell.
-                                // External protocols are handed to Android rather than rendered
-                                // as blank pages inside the workspace.
+                                val host = uri.host?.lowercase()
+                                val trustedWorkspace = host == HubMindNativeBridge.WORKSPACE_HOST
+                                val trustedAuthHosts = setOf(
+                                    "accounts.google.com",
+                                    "accounts.googleusercontent.com",
+                                    "identitytoolkit.googleapis.com",
+                                    "securetoken.googleapis.com",
+                                    "www.googleapis.com"
+                                )
                                 return when (uri.scheme?.lowercase()) {
                                     "mailto", "tel", "sms" -> {
                                         runCatching {
@@ -133,7 +155,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                         true
                                     }
-                                    "http", "https" -> false
+                                    "https" -> {
+                                        if (trustedWorkspace || host in trustedAuthHosts) {
+                                            false
+                                        } else {
+                                            runCatching {
+                                                startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                            }
+                                            true
+                                        }
+                                    }
                                     else -> true
                                 }
                             }
