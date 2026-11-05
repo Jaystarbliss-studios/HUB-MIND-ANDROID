@@ -212,6 +212,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // When this workspace is hosted inside the Android app, keep the native
+  // device agent authenticated with the same Firebase identity. onIdTokenChanged
+  // also fires when Firebase refreshes the ID token, so the foreground service
+  // does not keep polling with an expired credential.
+  useEffect(() => {
+    if (!isBrowser) return;
+    const stopTokenListener = onIdTokenChanged(auth, async (firebaseUser) => {
+      const bridge = (window as any).HubMindNative;
+      if (!bridge) return;
+      if (!firebaseUser) {
+        try { bridge.onHubMindSignOut?.(); } catch {}
+        return;
+      }
+      try {
+        const idToken = await firebaseUser.getIdToken(false);
+        bridge.onHubMindAuth?.(firebaseUser.uid, idToken);
+      } catch (error) {
+        console.warn('[HubMind] Native Android session sync was unavailable:', error);
+      }
+    });
+    return () => stopTokenListener();
+  }, []);
+
   const updatePreferredName = async (preferredName: string) => {
     const clean = preferredName.trim();
     if (!profile || !clean) return;
